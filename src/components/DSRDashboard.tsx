@@ -70,7 +70,7 @@ export default function DSRDashboard({
   const [freqFilterType, setFreqFilterType] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
 
   // Navigation for the 5 horizontal buttons
-  const [activeTab, setActiveTab] = useState<'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project'>('project_table');
+  const [activeTab, setActiveTab] = useState<'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section'>('project_table');
 
   // Heatmap Calendar state declarations
   const [heatmapMonth, setHeatmapMonth] = useState<number>(5); // Default to June (index 5)
@@ -111,6 +111,7 @@ export default function DSRDashboard({
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
 
   const [commonSearchTerm, setCommonSearchTerm] = useState('');
+  const [keywordSearchTerm, setKeywordSearchTerm] = useState('');
 
   // Date filters (moved inside the top Workspace Filters section)
   const [dateFilterType, setDateFilterType] = useState<'all' | 'today' | 'yesterday' | 'last_7_days' | 'custom'>('all');
@@ -218,6 +219,7 @@ export default function DSRDashboard({
       customValues: Record<string, string | number | boolean>;
       workTypes: string[];
       contentUpdates: string[];
+      selectedKeywords: string[];
       workSummary: string;
       entryId: string;
     }[] = [];
@@ -244,6 +246,7 @@ export default function DSRDashboard({
           customValues: w.customValues || {},
           workTypes: w.workTypes || ['seo_backlink'],
           contentUpdates: w.contentUpdates || [],
+          selectedKeywords: w.selectedKeywords || [],
           workSummary: w.workSummary || '',
           entryId: entry.id,
         });
@@ -830,6 +833,71 @@ export default function DSRDashboard({
     }));
   }, [filteredProjectsForMetrics, filteredWorks, unworkedFilter]);
 
+  const keywordStats = useMemo(() => {
+    interface KeywordItem {
+      id: string;
+      projName: string;
+      code: string;
+      priority: string;
+      frequency: string;
+      domain: string;
+      keyword: string;
+      ranking: string;
+      timesWorked: number;
+      lastWorkedDate: string;
+    }
+    
+    const items: KeywordItem[] = [];
+    
+    filteredProjectsForMetrics.forEach((proj) => {
+      const kws = Array.isArray(proj.keywords) ? proj.keywords.filter(Boolean) : [];
+      kws.forEach((kw) => {
+        let timesWorked = 0;
+        let lastWorked = 'Never';
+        
+        filteredWorks.forEach((work) => {
+          if (work.projectId === proj.id) {
+            const hasKeyword = Array.isArray(work.selectedKeywords) && work.selectedKeywords.includes(kw);
+            if (hasKeyword) {
+              timesWorked++;
+              if (lastWorked === 'Never' || work.date > lastWorked) {
+                lastWorked = work.date;
+              }
+            }
+          }
+        });
+        
+        items.push({
+          id: `${proj.id}-${kw}`,
+          projName: proj.name,
+          code: proj.code || '',
+          priority: proj.priority || '',
+          frequency: proj.frequency ? String(proj.frequency) : '',
+          domain: proj.domain || '',
+          keyword: kw,
+          ranking: '', // blank for now as requested
+          timesWorked,
+          lastWorkedDate: lastWorked
+        });
+      });
+    });
+    
+    return items.map((item, index) => ({
+      ...item,
+      srNo: index + 1
+    }));
+  }, [filteredProjectsForMetrics, filteredWorks]);
+
+  const filteredKeywordStats = useMemo(() => {
+    if (!keywordSearchTerm.trim()) return keywordStats;
+    const term = keywordSearchTerm.toLowerCase();
+    return keywordStats.filter(item => 
+      item.keyword.toLowerCase().includes(term) || 
+      item.projName.toLowerCase().includes(term) || 
+      item.domain.toLowerCase().includes(term)
+    ).map((item, idx) => ({ ...item, srNo: idx + 1 }));
+  }, [keywordStats, keywordSearchTerm]);
+
   const toggleProjectStats = (projId: string) => {
     setExpandedProjectStats(prev => ({
       ...prev,
@@ -842,7 +910,8 @@ export default function DSRDashboard({
     { id: 'frequency' as const, label: 'Frequency', icon: Clock },
     { id: 'activity' as const, label: isAdmin ? 'Team Activity' : 'Activity', icon: Calendar },
     { id: 'backlinks' as const, label: 'Backlinks', icon: Percent },
-    { id: 'unworked_project' as const, label: 'Unworked Projects', icon: FolderOpen }
+    { id: 'unworked_project' as const, label: 'Unworked Projects', icon: FolderOpen },
+    { id: 'keyword_section' as const, label: 'Keywords', icon: Tag }
   ];
 
   return (
@@ -2432,6 +2501,168 @@ export default function DSRDashboard({
                             </button>
                           </td>
                         )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'keyword_section' && (
+          <div>
+            <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Keyword Section</h3>
+                <span className="text-[10px] text-gray-400 font-bold uppercase mt-1 block">
+                  Organic SEO keyword performance and daily logged operations
+                </span>
+              </div>
+              
+              <div className="relative w-full sm:w-64">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                  <Search size={14} />
+                </span>
+                <input
+                  type="text"
+                  value={keywordSearchTerm}
+                  onChange={(e) => setKeywordSearchTerm(e.target.value)}
+                  placeholder="Search keywords or domains..."
+                  className="w-full text-xs pl-9 pr-3 py-2 border border-gray-200 rounded-xl focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                />
+              </div>
+            </div>
+
+            {filteredKeywordStats.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-500 font-bold space-y-1 bg-slate-50/40 rounded-b-2xl border-t border-slate-150">
+                <p>No keywords found matching the current workspace and search criteria.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[900px] border-collapse">
+                  <thead className="bg-slate-50/55 text-slate-500 font-extrabold text-[10px] uppercase border-b border-gray-150">
+                    <tr>
+                      <th className="px-4 py-3 w-14 text-center">Sr No.</th>
+                      <th className="px-4 py-3">Project Name</th>
+                      <th className="px-4 py-3">Domain</th>
+                      <th className="px-4 py-3">Keyword</th>
+                      <th className="px-4 py-3 w-28 text-center">Priority</th>
+                      <th className="px-4 py-3 w-28 text-center">Frequency</th>
+                      <th className="px-4 py-3">Ranking</th>
+                      <th className="px-4 py-3 text-center">Times Worked</th>
+                      <th className="px-4 py-3">Last Worked</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-150">
+                    {filteredKeywordStats.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
+                        {/* Sr No. */}
+                        <td className="px-4 py-3.5 font-mono font-black text-gray-400 text-center">{item.srNo}</td>
+                        
+                        {/* Project Name & Code */}
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono bg-indigo-50 text-indigo-700 font-black text-[9px] px-1.5 py-0.5 rounded">
+                              {item.code || 'PRJ'}
+                            </span>
+                            <span className="font-bold text-gray-900">{item.projName}</span>
+                          </div>
+                        </td>
+
+                        {/* Domain with a link */}
+                        <td className="px-4 py-3.5">
+                          {item.domain ? (
+                            <a 
+                              href={item.domain.startsWith('http') ? item.domain : `https://${item.domain}`} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="font-mono text-indigo-600 hover:underline text-[11px] font-bold bg-indigo-50/25 border border-indigo-100/50 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1"
+                            >
+                              {item.domain}
+                            </a>
+                          ) : (
+                            <span className="text-gray-300 italic text-[10px] font-normal">—</span>
+                          )}
+                        </td>
+
+                        {/* Keyword Name Column */}
+                        <td className="px-4 py-3.5 text-left">
+                          <span className="inline-block bg-amber-50 text-amber-900 font-extrabold px-2.5 py-1 rounded-xl border border-amber-200/50 text-[11px] font-mono shadow-3xs">
+                            {item.keyword}
+                          </span>
+                        </td>
+
+                        {/* Priority Column */}
+                        <td className="px-4 py-3.5 text-center">
+                          {item.priority === 'P1' && (
+                            <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded border border-red-100 uppercase tracking-wider">
+                              🚨 P1 High
+                            </span>
+                          )}
+                          {item.priority === 'P2' && (
+                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wider">
+                              ⚡ P2 Med
+                            </span>
+                          )}
+                          {item.priority === 'P3' && (
+                            <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
+                              🟢 P3 Low
+                            </span>
+                          )}
+                          {!['P1', 'P2', 'P3'].includes(item.priority || '') && (
+                            <span className="text-[10px] font-bold text-gray-400 italic">
+                              —
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Frequency Column */}
+                        <td className="px-4 py-3.5 text-center">
+                          {item.frequency ? (
+                            <span className="inline-flex items-center gap-1.5 bg-indigo-50/50 text-indigo-800 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100 text-[11px]">
+                              {item.frequency} / wk
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-gray-400 italic">—</span>
+                          )}
+                        </td>
+
+                        {/* Ranking Column (Blank) */}
+                        <td className="px-4 py-3.5 text-left font-mono font-semibold text-gray-400">
+                          —
+                        </td>
+
+                        {/* Times Worked Column */}
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex items-center justify-center font-bold px-2.5 rounded-full text-[10px] h-5 min-w-5 leading-none font-mono ${
+                            item.timesWorked > 0 
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                              : 'bg-gray-100 text-gray-400'
+                          }`}>
+                            {item.timesWorked}
+                          </span>
+                        </td>
+
+                        {/* Last Worked Column */}
+                        <td className="px-4 py-3.5 text-left">
+                          {(() => {
+                            if (item.lastWorkedDate === 'Never') {
+                              return <span className="text-gray-400 font-bold font-mono">—</span>;
+                            }
+                            
+                            try {
+                              const d = new Date(item.lastWorkedDate);
+                              return (
+                                <span className="text-gray-800 font-extrabold font-mono text-xs">
+                                  {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              );
+                            } catch {
+                              return <span className="text-gray-800 font-extrabold font-mono text-xs">{item.lastWorkedDate}</span>;
+                            }
+                          })()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
