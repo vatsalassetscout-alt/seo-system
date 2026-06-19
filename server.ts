@@ -32,38 +32,7 @@ try {
 }
 
 // 1. Beautiful Default Corporate Projects
-const defaultProjects = [
-  {
-    id: "titan-realestate",
-    domain: "titan-realestate.com",
-    name: "Titan Real Estate Corporate",
-    code: "TITN",
-    location: "Mumbai",
-    region: "West",
-    users: ["vatsal.assetscout@gmail.com", "vatsalpatel1720@gmail.com", "vatsalpatelwork20@gmail.com"],
-    description: "Titan core asset monitoring portal"
-  },
-  {
-    id: "aerospace-craft",
-    domain: "aerospace-craft.org",
-    name: "AeroSpace Craft Logistics",
-    code: "AERO",
-    location: "Delhi",
-    region: "North",
-    users: ["vatsal.assetscout@gmail.com", "vatsalpatel1720@gmail.com", "vatsalpatelwork20@gmail.com"],
-    description: "Green technology operations"
-  },
-  {
-    id: "clean-energy",
-    domain: "clean-energy.net",
-    name: "Clean Energy Development",
-    code: "CLNR",
-    location: "Bengaluru",
-    region: "South",
-    users: ["vatsal.assetscout@gmail.com", "vatsalpatel1720@gmail.com", "vatsalpatelwork20@gmail.com"],
-    description: "Solar deployment management"
-  }
-];
+const defaultProjects: any[] = [];
 
 // 2. Beautiful default initial Daily Status Reports (DSRs)
 const defaultSubmissions: any[] = [];
@@ -142,7 +111,7 @@ const ensureSheetExists = async (token: string, spreadsheetId: string, title: st
 };
 
 const fetchProjectsFromSheets = async (token: string, spreadsheetId: string, sheetName: string = "Projects_Mapping"): Promise<any[][]> => {
-  const range = encodeURIComponent(`${sheetName}!A1:H300`);
+  const range = encodeURIComponent(`${sheetName}!A1:Z1000`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
 
   const res = await fetch(url, {
@@ -165,19 +134,25 @@ const fetchProjectsFromSheets = async (token: string, spreadsheetId: string, she
 const seedProjectsToSheets = async (token: string, spreadsheetId: string, sheetName: string = "Projects_Mapping") => {
   await ensureSheetExists(token, spreadsheetId, sheetName);
   const headers = [
-    "Project ID", "Domain", "Project Name", "Project Code", "Location", "Region", "Assigned Users", "Description"
+    "Project Name", "Domain", "Location", "Region", "Users", 
+    "Keyword1", "Keyword2", "Keyword3", "Keyword4", "Keyword5", "Keyword6", "Keyword7", "Keyword8"
   ];
   const rows = [
     headers,
     ...defaultProjects.map(p => [
-      p.id,
-      p.domain,
       p.name,
-      p.code,
+      p.domain,
       p.location,
       p.region,
       p.users.join(', '),
-      p.description
+      (p.keywords || [])[0] || "",
+      (p.keywords || [])[1] || "",
+      (p.keywords || [])[2] || "",
+      (p.keywords || [])[3] || "",
+      (p.keywords || [])[4] || "",
+      (p.keywords || [])[5] || "",
+      (p.keywords || [])[6] || "",
+      (p.keywords || [])[7] || ""
     ])
   ];
 
@@ -208,15 +183,32 @@ const syncProjects = async (token: string, spreadsheetId: string, sheetName: str
 
     // Auto-detect index of each expected column to fully tolerate column variations
     const colIdx = {
-      id: normalizedHeaders.findIndex(h => h.includes('id') || h.includes('code')),
       domain: normalizedHeaders.findIndex(h => h.includes('domain') || h.includes('website') || h.includes('url') || h.includes('link')),
       name: normalizedHeaders.findIndex(h => h.includes('project') || h.includes('name') || h === 'title'),
-      code: normalizedHeaders.findIndex(h => h.includes('code') || h === 'short'),
       location: normalizedHeaders.findIndex(h => h.includes('location') || h.includes('city') || h.includes('office')),
       region: normalizedHeaders.findIndex(h => h.includes('region') || h.includes('zone') || h === 'area'),
-      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee')),
-      description: normalizedHeaders.findIndex(h => h.includes('description') || h.includes('desc'))
+      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee'))
     };
+
+    // Find all keyword column indices
+    const keywordColIdxs: number[] = [];
+    normalizedHeaders.forEach((h, idx) => {
+      if (h.includes('keyword')) {
+        keywordColIdxs.push(idx);
+      }
+    });
+
+    const localProjMap = new Map<string, any>();
+    if (fs.existsSync(PROJECTS_FALLBACK_FILE)) {
+      try {
+        const localList = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+        localList.forEach((p: any) => {
+          if (p.id) localProjMap.set(p.id, p);
+        });
+      } catch (err) {
+        console.error("Failed to parse projects local fallback:", err);
+      }
+    }
 
     const mapped = rows.slice(1).map((row: any) => {
       const getVal = (idx: number, fallback: string = "") => {
@@ -225,16 +217,33 @@ const syncProjects = async (token: string, spreadsheetId: string, sheetName: str
 
       const domain = getVal(colIdx.domain);
       const name = getVal(colIdx.name, domain || "Unnamed Project");
-      const id = getVal(colIdx.id, name.toLowerCase().replace(/[^a-z0-9]/g, "-") || `p-${Date.now()}`);
-      const code = getVal(colIdx.code, name.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      
+      const cleanDomain = domain.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const id = cleanDomain || cleanName || `p-${Date.now()}`;
+      const code = name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || "PROJ";
+
       const location = getVal(colIdx.location, "Mumbai");
       const region = getVal(colIdx.region, "West");
       const usersStr = getVal(colIdx.users);
-      const description = getVal(colIdx.description);
+      const description = "";
+
+      const localP = localProjMap.get(id);
+      const priority = localP ? (localP.priority || "") : "";
+      const frequency = localP ? (localP.frequency || "") : "";
 
       const usersList = usersStr 
         ? usersStr.split(/[,;|]/).map((u: string) => u.trim().toLowerCase()).filter(Boolean) 
         : [];
+
+      // Fetch keywords up to 8
+      const keywords: string[] = [];
+      keywordColIdxs.forEach(idx => {
+        const val = getVal(idx);
+        if (val && keywords.length < 8) {
+          keywords.push(val);
+        }
+      });
 
       return {
         id,
@@ -244,7 +253,10 @@ const syncProjects = async (token: string, spreadsheetId: string, sheetName: str
         location,
         region,
         users: usersList,
-        description
+        description,
+        priority,
+        frequency,
+        keywords
       };
     }).filter((p: any) => p.name);
 
@@ -261,7 +273,7 @@ const syncProjects = async (token: string, spreadsheetId: string, sheetName: str
 
 const fetchSubmissionsFromSheets = async (token: string, spreadsheetId: string, sheetName: string = "DSR_Logs"): Promise<any[][]> => {
   await ensureSheetExists(token, spreadsheetId, sheetName);
-  const range = encodeURIComponent(`${sheetName}!A1:S5000`);
+  const range = encodeURIComponent(`${sheetName}!A1:Z5000`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
 
   const res = await fetch(url, {
@@ -321,6 +333,8 @@ const parseSubmissionsRows = (rows: string[][]): any[] => {
     const videoPptCount = parseInt(row[16], 10) || 0;
     const profileCount = parseInt(row[17], 10) || 0;
     const linkCount = parseInt(row[18], 10) || 0;
+    const priorityVal = row[19] || '';
+    const frequencyVal = row[20] || '';
 
     const workItem = {
       id: subBlockId,
@@ -338,7 +352,10 @@ const parseSubmissionsRows = (rows: string[][]): any[] => {
       customValues,
       workTypes,
       contentUpdates,
-      workSummary
+      selectedKeywords: (customValues as any)?.selectedKeywords || [],
+      workSummary,
+      priority: priorityVal,
+      frequency: frequencyVal
     };
 
     if (!groupedEntries[dsrParentId]) {
@@ -366,7 +383,7 @@ const syncSubmissions = async (token: string, spreadsheetId: string, sheetName: 
         'DSR ID', 'Reporting Date', 'User Email', 'Project ID', 'Project Name',
         'Listing Count', 'Blog Count', 'PDF Count', 'Image Count', 'Work Narrative',
         'Custom Values JSON', 'CreatedAt', 'Work Types', 'Content Updates', 'Work Summary',
-        'Forum Count', 'Video PPT Count', 'Profile Count', 'Link Count'
+        'Forum Count', 'Video PPT Count', 'Profile Count', 'Link Count', 'Priority', 'Frequency'
       ];
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1`)}?valueInputOption=USER_ENTERED`;
       await fetch(url, {
@@ -396,23 +413,29 @@ const writeAllProjectsToSheets = async (token: string, spreadsheetId: string, pr
   try {
     await ensureSheetExists(token, spreadsheetId, sheetName);
     const headers = [
-      "Project ID", "Domain", "Project Name", "Project Code", "Location", "Region", "Assigned Users", "Description"
+      "Project Name", "Domain", "Location", "Region", "Users", 
+      "Keyword1", "Keyword2", "Keyword3", "Keyword4", "Keyword5", "Keyword6", "Keyword7", "Keyword8"
     ];
     const rows = [
       headers,
-      ...projectsList.map(p => [
-        p.id,
-        p.domain,
-        p.name,
-        p.code,
-        p.location,
-        p.region,
-        (p.users || []).join(', '),
-        p.description
-      ])
+      ...projectsList.map(p => {
+        const row = [
+          p.name,
+          p.domain,
+          p.location,
+          p.region,
+          (p.users || []).join(', ')
+        ];
+        // Pad keywords
+        const kws = p.keywords || [];
+        for (let i = 0; i < 8; i++) {
+          row.push(kws[i] || "");
+        }
+        return row;
+      })
     ];
 
-    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1:H1000`)}:clear`;
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1:M1000`)}:clear`;
     await fetch(clearUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` }
@@ -435,17 +458,31 @@ const writeAllProjectsToSheets = async (token: string, spreadsheetId: string, pr
 
 // Initialize dynamic local files on boot if empty
 try {
-  if (!fs.existsSync(PROJECTS_FALLBACK_FILE)) {
-    fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(defaultProjects, null, 2));
+  let projectsList: any[] = [];
+  if (fs.existsSync(PROJECTS_FALLBACK_FILE)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+      if (Array.isArray(existing)) {
+        projectsList = existing.filter((p: any) => p && p.id !== "titan-realestate" && p.id !== "aerospace-craft" && p.id !== "clean-energy");
+      }
+    } catch (e) {}
   }
+  fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(projectsList, null, 2));
 } catch (e) {
   console.error("Warning: Could not seed PROJECTS_FALLBACK_FILE:", e);
 }
 
 try {
-  if (!fs.existsSync(SUBMISSIONS_FALLBACK_FILE)) {
-    fs.writeFileSync(SUBMISSIONS_FALLBACK_FILE, JSON.stringify(defaultSubmissions, null, 2));
+  let subsList: any[] = [];
+  if (fs.existsSync(SUBMISSIONS_FALLBACK_FILE)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(SUBMISSIONS_FALLBACK_FILE, "utf-8"));
+      if (Array.isArray(existing)) {
+        subsList = existing.filter((s: any) => s && s.projectId !== "titan-realestate" && s.projectId !== "aerospace-craft" && s.projectId !== "clean-energy");
+      }
+    } catch (e) {}
   }
+  fs.writeFileSync(SUBMISSIONS_FALLBACK_FILE, JSON.stringify(subsList, null, 2));
 } catch (e) {
   console.error("Warning: Could not seed SUBMISSIONS_FALLBACK_FILE:", e);
 }
@@ -506,6 +543,12 @@ app.post("/api/auth/verify", (req, res) => {
 });
 
 const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null => {
+  // Always prioritize environment variables if configured
+  const envId = type === 'projects' ? process.env.GOOGLE_PROJECTS_SPREADSHEET_ID : process.env.GOOGLE_LOGS_SPREADSHEET_ID;
+  if (envId && envId.trim()) {
+    return envId.trim();
+  }
+
   const specificHeaderKey = type === 'projects' ? 'x-projects-spreadsheet-id' : 'x-logs-spreadsheet-id';
   const specificHeaderId = req.headers[specificHeaderKey];
   if (specificHeaderId && typeof specificHeaderId === 'string' && specificHeaderId.trim()) {
@@ -516,10 +559,7 @@ const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null =>
   if (headerId && typeof headerId === 'string' && headerId.trim()) {
     return headerId.trim();
   }
-  const envId = type === 'projects' ? process.env.GOOGLE_PROJECTS_SPREADSHEET_ID : process.env.GOOGLE_LOGS_SPREADSHEET_ID;
-  if (envId && envId.trim()) {
-    return envId.trim();
-  }
+
   return null;
 };
 
@@ -745,7 +785,22 @@ app.post("/api/submissions/append", async (req, res) => {
       const sheetName = submissionsTab;
       await ensureSheetExists(token, spreadsheetId, sheetName);
 
+      let projectsList: any[] = [];
+      try {
+        if (fs.existsSync(PROJECTS_FALLBACK_FILE)) {
+          projectsList = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+        } else {
+          projectsList = [...defaultProjects];
+        }
+      } catch (err) {
+        projectsList = [];
+      }
+
       const rowsToWrite = works.map((work: any, index: number) => {
+        const proj = projectsList.find((p: any) => p.id === work.projectId || p.name === work.projectName);
+        const priority = proj ? (proj.priority || '') : '';
+        const frequency = proj ? (proj.frequency || '') : '';
+
         return [
           `${submissionId}-${index}`,
           date,
@@ -765,7 +820,9 @@ app.post("/api/submissions/append", async (req, res) => {
           (work.forumCount ?? 0).toString(),
           (work.videoPptCount ?? 0).toString(),
           (work.profileCount ?? 0).toString(),
-          (work.linkCount ?? 0).toString()
+          (work.linkCount ?? 0).toString(),
+          priority,
+          frequency
         ];
       });
 

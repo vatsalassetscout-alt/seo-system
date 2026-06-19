@@ -25,7 +25,7 @@ export async function fetchProjectsFromSheet(
   token: string
 ): Promise<Project[]> {
   const cleanId = extractSpreadsheetId(spreadsheetId);
-  const range = encodeURIComponent(`${sheetName}!A1:D300`);
+  const range = encodeURIComponent(`${sheetName}!A1:Z1000`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}`;
 
   try {
@@ -262,6 +262,7 @@ export async function fetchSubmissionsFromSheet(
         customValues,
         workTypes,
         contentUpdates,
+        selectedKeywords: (customValues as any)?.selectedKeywords || [],
         workSummary
       };
 

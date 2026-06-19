@@ -48,29 +48,6 @@ export default function LoginScreen({
     // Determine the lowercase list of allowed user emails on the fly
     const usersLower = allowedUsers.map(u => u.email.toLowerCase());
 
-    if (activeTab === 'admin') {
-      const isAdmin = adminsLower.includes(email);
-      if (!isAdmin) {
-        if (usersLower.includes(email)) {
-          setErrorMsg('This is a Reporter/User email. Please login using the User Portal tab.');
-        } else {
-          setErrorMsg('Access Denied: This email is not registered as an Administrator.');
-        }
-        return;
-      }
-    } else {
-      // activeTab === 'user'
-      const isUser = usersLower.includes(email);
-      if (!isUser) {
-        if (adminsLower.includes(email)) {
-          setErrorMsg('This is an Administrator email. Please login using the Admin Panel tab.');
-        } else {
-          setErrorMsg('Access Denied: This email is not in the allowed user list. Please contact your system administrator.');
-        }
-        return;
-      }
-    }
-
     onLogin(email, activeTab);
   };
 

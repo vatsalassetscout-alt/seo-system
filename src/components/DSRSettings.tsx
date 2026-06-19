@@ -21,7 +21,11 @@ import {
   Hash,
   Database,
   UserPlus,
-  Layers
+  Layers,
+  Check,
+  Copy,
+  AlertTriangle,
+  ExternalLink
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -66,6 +70,8 @@ interface DSRSettingsProps {
   projectLocations: ProjectLocation[];
   onSetProjectLocations: React.Dispatch<React.SetStateAction<ProjectLocation[]>>;
   onUpdateProjects?: (updatedProjects: Project[]) => void;
+  alerts?: any[];
+  onAddAlert?: (alert: any) => void;
 }
 
 export default function DSRSettings({
@@ -90,34 +96,18 @@ export default function DSRSettings({
   projectLocations,
   onSetProjectLocations,
   onUpdateProjects,
+  alerts = [],
+  onAddAlert = () => {},
 }: DSRSettingsProps) {
   // Navigation Tabs inside Settings Panel
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'admins' | 'sheets'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'admins' | 'assignments'>('users');
 
   // Input states
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
 
-  // Google Sheets input states
-  const [localProjectsSpreadsheetId, setLocalProjectsSpreadsheetId] = useState(sheetSettings.projectsSpreadsheetId || sheetSettings.spreadsheetId || '');
-  const [localLogsSpreadsheetId, setLocalLogsSpreadsheetId] = useState(sheetSettings.logsSpreadsheetId || sheetSettings.spreadsheetId || '');
-  const [localProjectsTab, setLocalProjectsTab] = useState(sheetSettings.projectsTab || 'Projects_Mapping');
-  const [localSubmissionsTab, setLocalSubmissionsTab] = useState(sheetSettings.submissionsTab || 'DSR_Logs');
 
-  const handleSaveSheetSettings = (e: React.FormEvent) => {
-    e.preventDefault();
-    onUpdateSheetSettings({
-      projectsSpreadsheetId: localProjectsSpreadsheetId.trim(),
-      logsSpreadsheetId: localLogsSpreadsheetId.trim(),
-      spreadsheetId: localLogsSpreadsheetId.trim(), // fallback
-      projectsTab: localProjectsTab.trim() || 'Projects_Mapping',
-      submissionsTab: localSubmissionsTab.trim() || 'DSR_Logs',
-      locationsTab: 'Locations',
-      isConnected: true
-    });
-    triggerAlert('success', 'Google Sheets configuration updated locally. Trigger sync to refresh entries.');
-  };
 
   // Status Alerts
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -218,16 +208,17 @@ export default function DSRSettings({
           <Mail size={15} />
           Authorized Administrators
         </button>
+
         <button
-          onClick={() => setActiveSubTab('sheets')}
+          onClick={() => setActiveSubTab('assignments')}
           className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeSubTab === 'sheets'
+            activeSubTab === 'assignments'
               ? 'border-indigo-600 text-indigo-700'
               : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
           }`}
         >
-          <FileSpreadsheet size={15} />
-          Google Sheets Sync
+          <Lock size={15} />
+          Assign Project
         </button>
       </div>
 
@@ -261,7 +252,7 @@ export default function DSRSettings({
                   Employee Directory & Authorized Emails
                 </h4>
                 <p className="text-xs text-gray-400">
-                  Assign human names to corporate emails. Authorized employees will gain DSR access. All reports in the system will display these names.
+                  Assign human names to corporate emails. Authorized employees will gain Work Log access. All reports in the system will display these names.
                 </p>
               </div>
 
@@ -360,12 +351,12 @@ export default function DSRSettings({
                                 />
                               </td>
                               <td className="py-3.5 px-4 font-mono font-semibold text-gray-500">{u.email}</td>
-                              <td className="py-3.5 px-4 text-center font-mono text-gray-500">{userSubmissions} DSRs</td>
+                              <td className="py-3.5 px-4 text-center font-mono text-gray-500">{userSubmissions} Work Logs</td>
                               <td className="py-3.5 px-4 text-center">
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (window.confirm(`Revoke DSR system access and delete identity mapping for: ${u.name}?`)) {
+                                    if (window.confirm(`Revoke Work Log system access and delete identity mapping for: ${u.name}?`)) {
                                       onSetAllowedUsers(prev => prev.filter(item => item.email.toLowerCase() !== u.email.toLowerCase()));
                                       triggerAlert('success', `Revoked access for ${u.name}`);
                                     }
@@ -466,142 +457,203 @@ export default function DSRSettings({
           </div>
         )}
 
-        {/* TAB 3: Google Sheets Sync Configurations */}
-        {activeSubTab === 'sheets' && (
-          <div className="space-y-8 animate-fade-in mb-8">
-            <div className="border-b border-gray-100 pb-5">
-              <h4 className="font-extrabold text-gray-900 text-sm">Two-Sheet Google Workspace Database Mapping</h4>
-              <p className="text-xs text-gray-500 mt-1">
-                Configure separate spreadsheets for Project Directories and Submission Logs belonging to your workspace.
+
+
+        {/* TAB 4: Assign Projects Panel */}
+        {activeSubTab === 'assignments' && (
+          <div className="space-y-8 animate-fade-in text-left">
+            <div className="border-b border-gray-100 pb-4">
+              <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
+                <Lock size={16} className="text-indigo-600" />
+                Assign Work Domain to Reporter
+              </h4>
+              <p className="text-xs text-gray-450">
+                Create a targeted alert requesting an employee to fill task logs on a specific project for a selected date. The notification remains sticky until they submit!
               </p>
             </div>
 
-            <form onSubmit={handleSaveSheetSettings} className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Left Column: Projects Directory Sheet */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-                  <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center">
-                      <Layers size={16} />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-gray-800 uppercase tracking-wide">1. Projects Directory Sheet</h5>
-                      <p className="text-[10px] text-gray-400">Maps domains, locations, regions & assignees</p>
-                    </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* Form: Assign Project */}
+              <div className="md:col-span-1 bg-slate-50/50 p-6 rounded-2xl border border-gray-150 h-fit space-y-4">
+                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide">
+                  Create Assignment
+                </h5>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const formData = new FormData(form);
+                    const email = formData.get('userEmail') as string;
+                    const projectId = formData.get('projectId') as string;
+                    const date = formData.get('date') as string;
+                    const customMsg = formData.get('message') as string;
+
+                    if (!email || !projectId || !date) {
+                      triggerAlert('error', 'Please fill in all layout fields to continue.');
+                      return;
+                    }
+
+                    const matchedProj = projects.find(p => p.id === projectId);
+                    const payload = {
+                      id: `assign-${Date.now()}`,
+                      alertType: 'project_assignment',
+                      userEmail: email.trim().toLowerCase(),
+                      projectId: projectId,
+                      projectDomain: matchedProj?.domain || matchedProj?.name || '',
+                      projectName: matchedProj?.name || '',
+                      date: date,
+                      message: customMsg || `Admin has requested that you submit a Work Log for ${matchedProj?.name || 'domain'} for the reporting date of ${date}.`,
+                      adminEmail: currentUserEmail,
+                      createdAt: new Date().toISOString(),
+                      read: false
+                    };
+
+                    onAddAlert(payload);
+                    triggerAlert('success', `Direct task request dispatched for ${email} on date ${date}!`);
+                    form.reset();
+                  }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Reporter Email</label>
+                    <select
+                      name="userEmail"
+                      required
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
+                    >
+                      <option value="">- Select Human Reporter -</option>
+                      {allowedUsers.map(u => (
+                        <option key={u.email} value={u.email}>{u.name} ({u.email})</option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="space-y-3.5">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Spreadsheet Link or ID</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="https://docs.google.com/spreadsheets/d/... or raw-id"
-                        value={localProjectsSpreadsheetId}
-                        onChange={(e) => setLocalProjectsSpreadsheetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 focus:bg-white rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-medium text-gray-950"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Sheet Tab Name</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Projects_Mapping"
-                        value={localProjectsTab}
-                        onChange={(e) => setLocalProjectsTab(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 focus:bg-white rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-medium text-gray-950"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="bg-indigo-50/20 p-3.5 rounded-xl border border-indigo-100 text-[10px] text-indigo-850 leading-relaxed">
-                    <span className="font-bold">Recognized Headers:</span> ID, Domain, Project Name, Project Code, Location, Region, Assigned Users, Description.
-                  </div>
-                </div>
-
-                {/* Right Column: submissions log db */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-                  <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
-                      <Database size={16} />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-gray-800 uppercase tracking-wide">2. Central Logs Database Sheet</h5>
-                      <p className="text-[10px] text-gray-400">Stores historical daily reporting (DSR) logs</p>
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Project Domain</label>
+                    <select
+                      name="projectId"
+                      required
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
+                    >
+                      <option value="">- Select Active Project -</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.domain || 'no domain'})</option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="space-y-3.5">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Spreadsheet Link or ID</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="https://docs.google.com/spreadsheets/d/... or raw-id"
-                        value={localLogsSpreadsheetId}
-                        onChange={(e) => setLocalLogsSpreadsheetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 focus:bg-white rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-medium text-gray-950"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Sheet Tab Name</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="DSR_Logs"
-                        value={localSubmissionsTab}
-                        onChange={(e) => setLocalSubmissionsTab(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 focus:bg-white rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-medium text-gray-950"
-                      />
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Target Date</label>
+                    <input
+                      type="date"
+                      name="date"
+                      required
+                      defaultValue={new Date().toISOString().split('T')[0]}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono focus:outline-none"
+                    />
                   </div>
 
-                  <div className="bg-emerald-50/20 p-3.5 rounded-xl border border-emerald-100 text-[10px] text-emerald-800 leading-relaxed">
-                    <span className="font-bold">Logs Structure:</span> Submissions will append to this sheet. If empty, the system automatically initializes columns on first sync.
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Custom Notes</label>
+                    <textarea
+                      name="message"
+                      rows={3}
+                      placeholder="e.g. Please check SEO backlinks and indexation status"
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
+                    />
                   </div>
-                </div>
-              </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${sheetSettings.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-                  <span className="text-[11px] font-bold text-gray-600">
-                    {sheetSettings.isConnected 
-                      ? 'Secure Connection Live' 
-                      : 'Not Synced Yet'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-3">
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
                   >
-                    Save & Apply Configurations
+                    Send Assignment Task
                   </button>
+                </form>
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await onTriggerSync();
-                        triggerAlert('success', 'Google Sheets synchronization completed successfully!');
-                      } catch (err: any) {
-                        triggerAlert('error', `Sync failed: ${err.message || String(err)}`);
-                      }
-                    }}
-                    disabled={isSyncing}
-                    className="px-6 py-2.5 bg-gray-950 text-white hover:bg-black font-bold text-xs rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer select-none transition"
-                  >
-                    <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
-                    {isSyncing ? 'Synchronizing...' : 'Sync Now'}
-                  </button>
+              {/* Assignments History & Status Tracker Table */}
+              <div className="md:col-span-2 space-y-4">
+                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
+                  🛡️ Active Task Assignments Board
+                </h5>
+                <div className="bg-white border border-gray-150 rounded-2xl overflow-hidden shadow-2xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50/70 border-b border-gray-150 font-bold text-gray-500 text-[10px] uppercase">
+                        <tr>
+                          <th className="px-4 py-3">Reporter</th>
+                          <th className="px-4 py-3">Project Domain</th>
+                          <th className="px-4 py-3">Target Date</th>
+                          <th className="px-4 py-3">Logged?</th>
+                          <th className="px-4 py-3 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {(() => {
+                          const assignmentAlertsList = (alerts || []).filter(a => a.alertType === 'project_assignment');
+                          if (assignmentAlertsList.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-8 text-center text-gray-400 italic">
+                                  No direct assignments have been registered yet.
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return assignmentAlertsList.map((asg) => {
+                            // Check if logged matching user email, target date and project id
+                            const isFulfilled = (entries || []).some(entry => {
+                              const matchesUser = (entry.userEmail || '').trim().toLowerCase() === (asg.userEmail || '').trim().toLowerCase();
+                              const matchesDate = entry.date === asg.date;
+                              const hasProj = (entry.works || []).some(w => String(w.projectId) === String(asg.projectId));
+                              return matchesUser && matchesDate && hasProj;
+                            });
+
+                            const userRecord = allowedUsers.find(u => u.email.toLowerCase() === asg.userEmail.toLowerCase());
+
+                            return (
+                              <tr key={asg.id} className="hover:bg-slate-50/40">
+                                <td className="px-4 py-3.5">
+                                  <div className="font-bold text-gray-900">{userRecord?.name || asg.userEmail}</div>
+                                  <div className="text-[10px] text-gray-400 font-mono">{asg.userEmail}</div>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <div className="font-bold text-gray-800">{asg.projectName || 'Project'}</div>
+                                  <div className="text-[10px] font-mono text-indigo-600 font-bold">{asg.projectDomain}</div>
+                                </td>
+                                <td className="px-4 py-3.5 font-mono text-gray-600 font-semibold">
+                                  {asg.date}
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  {isFulfilled ? (
+                                    <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-100">
+                                      🟢 Yes, Filled
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-100">
+                                      🚨 Pending
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3.5 text-center">
+                                  {isFulfilled ? (
+                                    <span className="text-[10px] font-black text-emerald-600 tracking-wider">COMPLETED</span>
+                                  ) : (
+                                    <span className="text-[10px] font-black text-amber-600 animate-pulse tracking-wider">ACTIVE BANNER</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         )}
 

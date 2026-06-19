@@ -53,7 +53,11 @@ export default function App() {
 
   const [projects, setProjects] = useState<Project[]>(() => {
     const saved = localStorage.getItem('dsr_projects');
-    return saved ? JSON.parse(saved) : DEFAULT_PROJECTS;
+    const parsed = saved ? JSON.parse(saved) : DEFAULT_PROJECTS;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((p: any) => p && p.id !== "titan-realestate" && p.id !== "aerospace-craft" && p.id !== "clean-energy");
+    }
+    return [];
   });
 
   const [allowedUsers, setAllowedUsers] = useState<AppUser[]>(() => {
@@ -128,6 +132,7 @@ export default function App() {
   });
 
   const [showNotifications, setShowNotifications] = useState(false);
+  const [assignmentPreFill, setAssignmentPreFill] = useState<{ projectId: string; date: string } | null>(null);
 
   useEffect(() => {
     localStorage.setItem('dsr_admin_alerts', JSON.stringify(alerts));
@@ -135,14 +140,29 @@ export default function App() {
 
   const handleAddAlert = (alert: any) => {
     setAlerts(prev => [alert, ...prev]);
+    fetch("/api/alerts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alert })
+    }).catch(err => console.warn("Failed syncing new alert to backend fallback:", err));
   };
 
   const handleMarkAllAlertsAsRead = () => {
     setAlerts(prev => prev.map(a => ({ ...a, read: true })));
+    fetch("/api/alerts/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true })
+    }).catch(err => console.warn("Failed marking all alerts as read on backend:", err));
   };
 
   const handleClearAlert = (id: string) => {
     setAlerts(prev => prev.filter(a => a.id !== id));
+    fetch("/api/alerts/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    }).catch(err => console.warn("Failed deleting alert on backend:", err));
   };
 
   const [entries, setEntries] = useState<DSREntry[]>(() => {
@@ -151,7 +171,7 @@ export default function App() {
     try {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        return parsed.map((entry: any) => {
+        const migrated = parsed.map((entry: any) => {
           // If already format-compliant, return as is
           if (entry && entry.userEmail && Array.isArray(entry.works)) {
             return entry as DSREntry;
@@ -182,6 +202,20 @@ export default function App() {
             createdAt: entry?.createdAt || new Date().toISOString(),
           } as DSREntry;
         });
+
+        // Filter out any works and logs that refer to dummy hardcoded projects
+        return migrated
+          .map((entry) => {
+            const filteredWorks = entry.works.filter(
+              (w) =>
+                w.projectId !== 'titan-realestate' &&
+                w.projectId !== 'aerospace-craft' &&
+                w.projectId !== 'clean-energy' &&
+                w.projectId !== 'proj-1'
+            );
+            return { ...entry, works: filteredWorks };
+          })
+          .filter((entry) => entry.works && entry.works.length > 0);
       }
     } catch (e) {
       console.error("Failed to parse or migrate saved entries:", e);
@@ -425,6 +459,28 @@ export default function App() {
     });
   }, [projects, currentUserEmail, isAdmin, allowedUsers]);
   
+  // Active Project Assignment tasks for the currently logged in user
+  const activeAssignmentAlerts = useMemo(() => {
+    if (!currentUserEmail) return [];
+    const lowerCurrent = currentUserEmail.trim().toLowerCase();
+    
+    return alerts.filter(alert => {
+      if (alert.alertType !== 'project_assignment') return false;
+      const lowerEmail = (alert.userEmail || '').trim().toLowerCase();
+      if (lowerEmail !== lowerCurrent) return false;
+
+      // Check if user has already submitted a work log for this project on this target date
+      const isFulfilled = entries.some(entry => {
+        const matchesUser = (entry.userEmail || '').trim().toLowerCase() === lowerCurrent;
+        const matchesDate = entry.date === alert.date;
+        const hasProject = (entry.works || []).some(w => String(w.projectId) === String(alert.projectId));
+        return matchesUser && matchesDate && hasProject;
+      });
+
+      return !isFulfilled;
+    });
+  }, [alerts, entries, currentUserEmail]);
+
   // Filter alerts by role: admins see user notes and admin notes, users only see admin notes
   const visibleAlerts = alerts.filter(alert => {
     const isUserMsg = alert.alertType === 'user_message';
@@ -448,12 +504,18 @@ export default function App() {
         body: JSON.stringify({ email: emailLower })
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Login attempt rejected. Email not authorized.");
+      const bodyText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(bodyText);
+      } catch (jsonErr) {
+        throw new Error(`The workspace server returned an unexpected response format (Status: ${res.status}). Please try refreshing the page.`);
       }
 
-      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Login attempt rejected. Email not authorized.");
+      }
+
       const actualRole = data.role as 'user' | 'admin';
 
       if (role === 'admin' && actualRole !== 'admin') {
@@ -463,9 +525,9 @@ export default function App() {
       // Save user to memory/state instantly
       registerLoggedInUser(emailLower);
       setCurrentUserEmail(emailLower);
-      setCurrentUserRole(actualRole);
-      localStorage.setItem('dsr_logged_role', actualRole);
-      setActiveTab(actualRole === 'admin' ? 'dashboard' : 'submit');
+      setCurrentUserRole(role);
+      localStorage.setItem('dsr_logged_role', role);
+      setActiveTab(role === 'admin' ? 'dashboard' : 'submit');
 
       // Attempt background backend synchronisation for active state updates without blocking login UI or crashing
       syncWithBackend().catch((err) => {
@@ -520,13 +582,19 @@ export default function App() {
           body: JSON.stringify({ email: userEmail })
         });
 
-        if (!res.ok) {
-          const errData = await res.json();
-          await logout(); // invalidate local login since not accepted by backend
-          throw new Error(errData.error || "Google SSO account is not registered to enter workspace.");
+        const bodyText = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(bodyText);
+        } catch (jsonErr) {
+          await logout();
+          throw new Error(`The workspace server returned an unexpected response format (Status: ${res.status}).`);
         }
 
-        const data = await res.json();
+        if (!res.ok) {
+          await logout(); // invalidate local login since not accepted by backend
+          throw new Error(data?.error || "Google SSO account is not registered to enter workspace.");
+        }
 
         // Update local credentials
         if (data.allowedAdmins) setAdminEmails(data.allowedAdmins);
@@ -647,6 +715,32 @@ export default function App() {
     setProjects((prev) => [...prev, project]);
   };
 
+  const handleUpdateProject = async (updatedProject: Project) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
+    );
+    try {
+      const spreadsheetId = localStorage.getItem('dsr_projects_spreadsheet_id') || localStorage.getItem('dsr_spreadsheet_id') || '';
+      const projectsTab = localStorage.getItem('dsr_projects_tab') || 'Projects_Mapping';
+      const syncHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-spreadsheet-id': spreadsheetId,
+        'x-projects-tab': projectsTab,
+      };
+
+      await fetch("/api/projects", {
+        method: "POST",
+        headers: syncHeaders,
+        body: JSON.stringify({
+          action: "edit",
+          project: updatedProject
+        })
+      });
+    } catch (err) {
+      console.error("Failed to update project priority/frequency:", err);
+    }
+  };
+
   const handleDeleteProject = (id: string) => {
     if (window.confirm('Deleting this project will prevent future DSR submissions from tagging it. Continue?')) {
       setProjects((prev) => prev.filter((p) => p.id !== id));
@@ -733,7 +827,7 @@ export default function App() {
                   }`}
                 >
                   <PenTool size={14} />
-                  DSR Submission
+                  Work Log Submission
                 </button>
               )}
 
@@ -747,7 +841,7 @@ export default function App() {
                 }`}
               >
                 <Database size={14} />
-                DSR History Logs
+                Work Log History
               </button>
 
               <button
@@ -904,6 +998,50 @@ export default function App() {
       {/* Main app grid frame */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {/* Constant & Stable Project Assignment Alerts Banner */}
+        {activeAssignmentAlerts.length > 0 && (
+          <div className="mb-6 space-y-3">
+            {activeAssignmentAlerts.map((alert) => (
+              <div 
+                key={alert.id}
+                className="bg-amber-500/10 text-amber-900 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 font-sans shadow-2xs relative overflow-hidden"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-xl shrink-0 mt-0.5">🚨</span>
+                  <div className="text-left">
+                    <h4 className="font-extrabold text-[10px] text-amber-800 uppercase tracking-wider">
+                      Required Action: Log Assigned Task
+                    </h4>
+                    <p className="text-xs text-amber-950 font-bold mt-1">
+                      Please submit a Work Log for project <span className="underline decoration-amber-600 decoration-2">{alert.projectName} ({alert.projectDomain})</span> assigned for the target date <span className="font-mono text-amber-900 bg-amber-100 border border-amber-250 px-1.5 py-0.5 rounded font-black">{alert.date}</span>.
+                    </p>
+                    {alert.message && alert.message !== `Admin has requested that you submit a Work Log for ${alert.projectName} for the reporting date of ${alert.date}.` && (
+                      <p className="text-[11px] text-amber-700 font-semibold italic mt-0.5">
+                        &ldquo;{alert.message}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 self-end sm:self-auto">
+                  <button
+                    onClick={() => {
+                      setAssignmentPreFill({
+                        projectId: alert.projectId,
+                        date: alert.date
+                      });
+                      setActiveTab('submit');
+                    }}
+                    className="whitespace-nowrap px-4 py-2 bg-amber-600 hover:bg-amber-700 hover:scale-[1.01] active:scale-[0.99] text-white font-extrabold rounded-xl text-xs transition duration-75 shadow-xs cursor-pointer"
+                  >
+                    👉 Fill Work Log
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
               {/* Mobile quick tab Navigation */}
         <div className="flex md:hidden bg-white p-2 rounded-2xl border border-gray-150 mb-6 gap-1 justify-around shadow-xs">
           {!isAdmin && (
@@ -914,7 +1052,7 @@ export default function App() {
               }`}
             >
               <PenTool size={15} />
-              DSR Entry
+              Work Log Entry
             </button>
           )}
 
@@ -956,7 +1094,7 @@ export default function App() {
           <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-150 pb-6">
             <div className="space-y-1">
               <h1 className="text-xl font-black text-gray-900 tracking-tight sm:text-2xl flex items-center gap-2">
-                {activeTab === 'submit' && 'DSR Status Submissions'}
+                {activeTab === 'submit' && 'Work Log Submissions'}
                 {activeTab === 'logs' && 'Daily Task History'}
                 {activeTab === 'settings' && 'System Configuration Studio'}
               </h1>
@@ -991,6 +1129,8 @@ export default function App() {
                   onViewLogs={() => setActiveTab('logs')}
                   customSubmissionTypes={customSubmissionTypes}
                   onSendAdminMessage={handleSendUserMessage}
+                  preFill={assignmentPreFill}
+                  onClearPreFill={() => setAssignmentPreFill(null)}
                 />
               )}
 
@@ -1019,6 +1159,7 @@ export default function App() {
                   customSubmissionTypes={customSubmissionTypes}
                   alerts={alerts}
                   onAddAlert={handleAddAlert}
+                  onUpdateProject={handleUpdateProject}
                 />
               )}
 
@@ -1042,6 +1183,8 @@ export default function App() {
                   projectLocations={projectLocations}
                   onSetProjectLocations={setProjectLocations}
                   onUpdateProjects={setProjects}
+                  alerts={alerts}
+                  onAddAlert={handleAddAlert}
                 />
               )}
             </motion.div>

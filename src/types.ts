@@ -8,6 +8,8 @@ export interface Project {
   location?: string;
   region?: string;
   users?: string[];
+  priority?: string; // e.g. "P1", "P2", "P3"
+  keywords?: string[]; // Array of strings (up to 8 keywords per project)
 }
 
 export interface ProjectWork {
@@ -27,9 +29,10 @@ export interface ProjectWork {
   pdfSize?: string; // Legacy PDF File size
   imageUri?: string; // Legacy Base64 image preview URL
   imageName?: string; // Legacy Image file name
-  customValues: Record<string, string | number | boolean>; // id -> value
+  customValues: Record<string, any>; // id -> value, can also store selectedKeywords dynamic list
   workTypes?: string[]; // e.g. ["seo_backlink", "content_update"]
   contentUpdates?: string[]; // e.g. ["meta_title_desc", "keyword_update", "section_update", "restructure"]
+  selectedKeywords?: string[]; // Array of project keyword selections
   workSummary?: string; // Work Type note / summary
 }
 

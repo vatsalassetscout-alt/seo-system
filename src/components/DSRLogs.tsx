@@ -772,9 +772,20 @@ export default function DSRLogs({
 
                                           {/* Brief Text summary explanation / in front notes */}
                                           {work.workSummary && (
-                                            <span className="text-gray-650 italic bg-white px-2 py-0.5 border border-gray-150 rounded text-[10px] max-w-[260px] truncate" title={work.workSummary}>
-                                              — {work.workSummary}
-                                            </span>
+                                            <>
+                                              {((work.selectedKeywords && work.selectedKeywords.length > 0) || (work.customValues?.selectedKeywords && Array.isArray(work.customValues.selectedKeywords) && work.customValues.selectedKeywords.length > 0)) && (
+                                                <span className="flex flex-wrap items-center gap-1 my-0.5">
+                                                  {((work.selectedKeywords || work.customValues?.selectedKeywords || []) as string[]).map((kw: string) => (
+                                                    <span key={kw} className="bg-amber-100/60 text-amber-800 px-1.5 py-0.5 rounded font-black text-[9px] border border-amber-100/50 hover:bg-amber-105 transition-colors duration-100" title={kw}>
+                                                      # {kw}
+                                                    </span>
+                                                  ))}
+                                                </span>
+                                              )}
+                                              <span className="text-gray-650 italic bg-white px-2 py-0.5 border border-gray-150 rounded text-[10px] max-w-[260px] truncate" title={work.workSummary}>
+                                                — {work.workSummary}
+                                              </span>
+                                            </>
                                           )}
                                         </div>
                                       </div>

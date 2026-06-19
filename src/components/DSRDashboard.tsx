@@ -42,6 +42,7 @@ interface DSRDashboardProps {
   customSubmissionTypes?: CustomSubmissionType[];
   alerts?: any[];
   onAddAlert?: (alert: any) => void;
+  onUpdateProject?: (updatedProject: Project) => void;
 }
 
 export default function DSRDashboard({ 
@@ -53,7 +54,8 @@ export default function DSRDashboard({
   currentUserEmail = '',
   customSubmissionTypes = [],
   alerts = [],
-  onAddAlert
+  onAddAlert,
+  onUpdateProject
 }: DSRDashboardProps) {
   // Filter entries based on role representation (Admins see everything, regular users see only their own)
   const parsedEntries = useMemo(() => {
@@ -190,11 +192,6 @@ export default function DSRDashboard({
       }
     });
     
-    // Fallback default set if empty
-    if (regSet.size === 0) {
-      regSet.add('North');
-      regSet.add('West');
-    }
     return Array.from(regSet).sort();
   }, [projects]);
 
@@ -623,6 +620,8 @@ export default function DSRDashboard({
         totalBacklinks,
         timesWorked,
         lastWorked,
+        priority: p.priority,
+        frequency: p.frequency,
         srNo: idx + 1
       };
     });
@@ -1299,10 +1298,12 @@ export default function DSRDashboard({
                     <th className="px-4 py-3 w-14">Sr No.</th>
                     <th className="px-4 py-3">Project Name</th>
                     <th className="px-4 py-3">Domain</th>
-                    <th className="px-4 py-3">Backlinks / Activity</th>
+                    <th className="px-4 py-3 w-28">Priority</th>
+                    <th className="px-4 py-3 w-28 text-center">Frequency</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
                     {isAdmin && <th className="px-4 py-3">Assigned To</th>}
+                    {isAdmin && <th className="px-4 py-3 w-44">Admin Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-150">
@@ -1327,15 +1328,35 @@ export default function DSRDashboard({
                             </span>
                           </td>
                           <td className="px-4 py-3">
+                            {item.priority === 'P1' && (
+                              <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded border border-red-100 uppercase tracking-wider">
+                                🚨 P1 High
+                              </span>
+                            )}
+                            {item.priority === 'P2' && (
+                              <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wider">
+                                ⚡ P2 Med
+                              </span>
+                            )}
+                            {item.priority === 'P3' && (
+                              <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
+                                🟢 P3 Low
+                              </span>
+                            )}
+                            {!['P1', 'P2', 'P3'].includes(item.priority || '') && (
+                              <span className="text-[10px] font-bold text-gray-400 italic">
+                                — none —
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
                             <button
                               type="button"
                               onClick={() => toggleProjectStats(item.id)}
-                              className="inline-flex items-center gap-1.5 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 font-black px-2.5 py-1 rounded-lg border border-indigo-100 transition-all cursor-pointer"
-                              title="Click to view full distribution charts"
+                              className="inline-flex items-center gap-1.5 bg-indigo-50/50 hover:bg-indigo-100/75 text-indigo-800 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100 transition duration-75 text-[11px] cursor-pointer"
+                              title="Click to toggle cumulative backlog stats"
                             >
-                              <TrendingUp size={11} className="shrink-0" />
-                              <span>{item.totalBacklinks} backlinks</span>
-                              <span className="text-[9px] font-normal text-indigo-500">• view</span>
+                              <span>{item.frequency || 0} / wk</span>
                               {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                             </button>
                           </td>
@@ -1354,12 +1375,49 @@ export default function DSRDashboard({
                               </span>
                             </td>
                           )}
+                          {isAdmin && (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  value={item.priority || ''}
+                                  onChange={(e) => {
+                                    const pVal = e.target.value;
+                                    const orig = projects.find(pr => pr.id === item.id);
+                                    if (orig && onUpdateProject) {
+                                      onUpdateProject({ ...orig, priority: pVal });
+                                    }
+                                  }}
+                                  className="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-gray-200 rounded text-gray-800 cursor-pointer focus:outline-none"
+                                >
+                                  <option value="">- Priority -</option>
+                                  <option value="P1">P1</option>
+                                  <option value="P2">P2</option>
+                                  <option value="P3">P3</option>
+                                </select>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="14"
+                                  placeholder="Freq"
+                                  value={item.frequency !== undefined && item.frequency !== null ? item.frequency : ''}
+                                  onChange={(e) => {
+                                    const nextFreq = e.target.value;
+                                    const orig = projects.find(pr => pr.id === item.id);
+                                    if (orig && onUpdateProject) {
+                                      onUpdateProject({ ...orig, frequency: nextFreq });
+                                    }
+                                  }}
+                                  className="w-12 px-1 py-0.5 text-[10px] font-mono text-center font-bold bg-white border border-gray-200 rounded text-gray-800 focus:outline-none"
+                                />
+                              </div>
+                            </td>
+                          )}
                         </tr>
 
                         {/* Expandable distribution details sub-row */}
                         {isExpanded && (
                           <tr className="bg-slate-50/30">
-                            <td colSpan={isAdmin ? 7 : 6} className="px-6 py-3 border-t border-b border-gray-150">
+                            <td colSpan={isAdmin ? 9 : 7} className="px-6 py-3 border-t border-b border-gray-150">
                               <div className="bg-white p-3.5 rounded-xl border border-gray-150 space-y-3.5">
                                 <div className="flex items-center justify-between">
                                   <span className="font-bold text-xs text-gray-800 flex items-center gap-1.5">

@@ -31,6 +31,8 @@ interface DSRFormProps {
   onViewLogs?: () => void;
   customSubmissionTypes?: CustomSubmissionType[];
   onSendAdminMessage?: (message: string) => void;
+  preFill?: { projectId: string; date: string } | null;
+  onClearPreFill?: () => void;
 }
 
 export default function DSRForm({
@@ -41,6 +43,8 @@ export default function DSRForm({
   onViewLogs,
   customSubmissionTypes = [],
   onSendAdminMessage,
+  preFill,
+  onClearPreFill,
 }: DSRFormProps) {
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -63,6 +67,7 @@ export default function DSRForm({
       customValues: {},
       workTypes: ['seo_backlink'], // default to SEO backlink submission
       contentUpdates: [],
+      selectedKeywords: [],
       workSummary: '',
     }
   ]);
@@ -87,6 +92,36 @@ export default function DSRForm({
     }
   }, [projects]);
 
+  useEffect(() => {
+    if (preFill && preFill.projectId) {
+      setSelectedDate(preFill.date);
+      const matched = projects.find(p => p.id === preFill.projectId);
+      if (matched) {
+        setWorksList([{
+          projectId: matched.id,
+          projectName: matched.name,
+          listingCount: '',
+          blogCount: '',
+          forumCount: '',
+          pdfCount: '',
+          imageCount: '',
+          videoPptCount: '',
+          profileCount: '',
+          linkCount: '',
+          blog: '',
+          customValues: {},
+          workTypes: ['seo_backlink'],
+          contentUpdates: [],
+          selectedKeywords: [],
+          workSummary: '',
+        }]);
+      }
+      if (onClearPreFill) {
+        onClearPreFill();
+      }
+    }
+  }, [preFill, projects, onClearPreFill]);
+
   // Update item field
   const handleUpdateWorkBlock = (index: number, updates: Partial<any>) => {
     setWorksList((prev) =>
@@ -94,12 +129,13 @@ export default function DSRForm({
         if (idx !== index) return item;
         const next = { ...item, ...updates };
         
-        // If changing projectId, sync projectName
+        // If changing projectId, sync projectName and reset keywords
         if (updates.projectId) {
           const matchedProj = projects.find((p) => p.id === updates.projectId);
           if (matchedProj) {
             next.projectName = matchedProj.name;
           }
+          next.selectedKeywords = [];
         }
         return next;
       })
@@ -123,6 +159,7 @@ export default function DSRForm({
         customValues: {},
         workTypes: ['seo_backlink'],
         contentUpdates: [],
+        selectedKeywords: [],
         workSummary: '',
       }
     ]);
@@ -186,7 +223,7 @@ export default function DSRForm({
     }
 
     // Parse and validate custom submission types
-    const cleanCustomValues: Record<string, number> = {};
+    const cleanCustomValues: Record<string, any> = {};
     if (hasSEO) {
       for (const cType of customSubmissionTypes) {
         const rawVal = work.customValues?.[cType.id];
@@ -197,6 +234,11 @@ export default function DSRForm({
         }
         cleanCustomValues[cType.id] = parsed;
       }
+    }
+
+    // Put selectedKeywords inside customValues for flexible sheets storage if chosen
+    if (work.selectedKeywords && work.selectedKeywords.length > 0) {
+      cleanCustomValues['selectedKeywords'] = work.selectedKeywords;
     }
 
     const cleanWorksList: Omit<ProjectWork, 'id'>[] = [
@@ -215,6 +257,7 @@ export default function DSRForm({
         customValues: cleanCustomValues,
         workTypes,
         contentUpdates: work.contentUpdates || [],
+        selectedKeywords: work.selectedKeywords || [],
         workSummary: work.workSummary || '',
       }
     ];
@@ -238,9 +281,9 @@ export default function DSRForm({
             <CheckCircle2 size={32} className="animate-pulse text-emerald-600" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-xl font-bold text-gray-900">DSR Report Submitted Successfully!</h2>
+            <h2 className="text-xl font-bold text-gray-900">Work Log Submitted Successfully!</h2>
             <p className="text-xs text-gray-500">
-              Your Daily Status Report has been compiled and recorded under <strong>{getUserDisplayName(currentUserEmail, allowedUsers)}</strong>.
+              Your Work Log report has been compiled and recorded under <strong>{getUserDisplayName(currentUserEmail, allowedUsers)}</strong>.
             </p>
           </div>
           <div className="border-t border-gray-100 pt-8 space-y-5">
@@ -261,7 +304,7 @@ export default function DSRForm({
                   onClick={onViewLogs}
                   className="px-6 py-3 border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
                 >
-                  <Files size={14} /> View DSR History
+                  <Files size={14} /> View Work Log History
                 </button>
               )}
             </div>
@@ -681,6 +724,51 @@ export default function DSRForm({
 
                       </div>
 
+                      {/* Dynamic Keywords Multi-Select Sub-Section */}
+                      {(() => {
+                        const matchedProj = projects.find((p) => p.id === work.projectId);
+                        const kws = (matchedProj?.keywords || []).filter(Boolean);
+                        if (kws.length === 0) return null;
+
+                        return (
+                          <div id="keywords-selector-container" className="space-y-3.5 border border-amber-100 bg-amber-50/10 rounded-2xl p-5">
+                            <span className="block text-[10px] font-black text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                              📌 Keywords Selection
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-white p-4 rounded-xl border border-amber-150 shadow-2xs">
+                              {kws.map((kw) => {
+                                const selected = (work.selectedKeywords || []).includes(kw);
+                                return (
+                                  <label key={kw} className={`flex items-center gap-2.5 p-2 px-3 rounded-lg border cursor-pointer transition select-none ${
+                                    selected
+                                      ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                      : 'hover:bg-slate-50 border-gray-100 text-gray-755'
+                                  }`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selected}
+                                      onChange={() => {
+                                        const current = work.selectedKeywords || [];
+                                        const next = current.includes(kw)
+                                          ? current.filter((k: string) => k !== kw)
+                                          : [...current, kw];
+                                        if (next.length <= 8) {
+                                          handleUpdateWorkBlock(idx, { selectedKeywords: next });
+                                        }
+                                      }}
+                                      className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-gray-300 cursor-pointer"
+                                    />
+                                    <span className="text-xs font-bold truncate select-none leading-none" title={kw}>
+                                      {kw}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Row 3: Work Summary / Work Type note section to write anything */}
                       <div className="space-y-2">
                         <label htmlFor={`work-summary-${idx}`} className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -711,12 +799,12 @@ export default function DSRForm({
             {/* Submit Actions Panel */}
             <div className="flex justify-end items-center gap-4 pt-4">
               <button
-                id="dsr-compile-btn"
+                id="work-log-compile-btn"
                 type="submit"
                 className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition shadow-sm hover:shadow-md flex items-center gap-2 cursor-pointer grow sm:grow-0 justify-center"
               >
                 <CheckCircle2 size={16} />
-                Submit DSR Report
+                Submit Work Log
               </button>
             </div>
           </form>
