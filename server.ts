@@ -564,11 +564,32 @@ const ALLOWED_USERS = [
 // API ENDPOINTS
 // ==========================================
 
+const isUserAdmin = (email: string): boolean => {
+  if (!email) return false;
+  const emailLower = email.trim().toLowerCase();
+  if (emailLower.includes("admin")) return true;
+  if (ALLOWED_ADMINS.some(adm => adm.toLowerCase() === emailLower)) return true;
+  return false;
+};
+
+const cleanEmailToNameOrUsername = (email: string): string => {
+  if (!email) return "";
+  const emailLower = email.trim().toLowerCase();
+  if (emailLower.includes('@')) {
+    return emailLower.split('@')[0];
+  }
+  return emailLower;
+};
+
 // GET Auth configurations for sync
 app.get("/api/auth/config", (req, res) => {
+  const filteredUsers = ALLOWED_USERS
+    .filter(u => !isUserAdmin(u))
+    .map(u => cleanEmailToNameOrUsername(u));
+
   res.json({
     allowedAdmins: ALLOWED_ADMINS,
-    allowedUsers: ALLOWED_USERS
+    allowedUsers: filteredUsers
   });
 });
 
@@ -587,11 +608,15 @@ app.post("/api/auth/verify", (req, res) => {
     ALLOWED_USERS.push(emailLower);
   }
 
+  const filteredUsers = ALLOWED_USERS
+    .filter(u => !isUserAdmin(u))
+    .map(u => cleanEmailToNameOrUsername(u));
+
   return res.json({
     allowed: true,
     role: isAdmin ? "admin" : "user",
     allowedAdmins: ALLOWED_ADMINS,
-    allowedUsers: ALLOWED_USERS
+    allowedUsers: filteredUsers
   });
 });
 
@@ -717,13 +742,38 @@ app.get("/api/filters", async (req, res) => {
 
     const uniqueLocations = new Set<string>();
     const uniqueRegions = new Set<string>();
-    const uniqueEmails = new Set<string>();
+    const uniqueUserNames = new Set<string>();
+
+    const formatUserEmailToName = (email: string): string => {
+      if (!email) return "";
+      let clean = email.trim();
+      if (clean.includes("@")) {
+        clean = clean.split("@")[0];
+      }
+      if (clean.includes(".") || clean.includes("-") || clean.includes("_")) {
+        return clean
+          .split(/[\._-]/)
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" ");
+      }
+      return clean.charAt(0).toUpperCase() + clean.slice(1);
+    };
 
     projectsArr.forEach((p: any) => {
       if (p.location) uniqueLocations.add(p.location);
       if (p.region) uniqueRegions.add(p.region);
       if (p.users && Array.isArray(p.users)) {
-        p.users.forEach((u: string) => uniqueEmails.add(u.toLowerCase()));
+        p.users.forEach((u: string) => {
+          const userStr = u.trim();
+          if (userStr && !isUserAdmin(userStr)) {
+            if (userStr.includes("@")) {
+              const formatted = formatUserEmailToName(userStr);
+              if (formatted) uniqueUserNames.add(formatted);
+            } else {
+              uniqueUserNames.add(userStr);
+            }
+          }
+        });
       }
     });
 
@@ -742,29 +792,36 @@ app.get("/api/filters", async (req, res) => {
 
     submissionsArr.forEach((entry: any) => {
       if (entry.userEmail) {
-        uniqueEmails.add(entry.userEmail.trim().toLowerCase());
+        const userStr = entry.userEmail.trim();
+        if (userStr && !isUserAdmin(userStr)) {
+          if (userStr.includes("@")) {
+            const formatted = formatUserEmailToName(userStr);
+            if (formatted) uniqueUserNames.add(formatted);
+          } else {
+            uniqueUserNames.add(userStr);
+          }
+        }
       }
     });
 
-    if (uniqueLocations.size === 0) {
-      uniqueLocations.add("Mumbai");
-      uniqueLocations.add("Delhi");
-      uniqueLocations.add("Bengaluru");
-    }
     if (uniqueRegions.size === 0) {
       uniqueRegions.add("North");
       uniqueRegions.add("West");
       uniqueRegions.add("South");
     }
 
+    const finalUsers = Array.from(uniqueUserNames).map(user => {
+      return {
+        email: user,
+        name: user
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
     return res.json({
       projects: projectsArr,
-      locations: Array.from(uniqueLocations).sort(),
+      locations: [], // Empty locations so they are removed from the location dropdown
       regions: Array.from(uniqueRegions).sort(),
-      users: Array.from(uniqueEmails).map(email => ({
-        email,
-        name: email.includes('@') ? email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1) : email
-      })).sort((a, b) => a.name.localeCompare(b.name))
+      users: finalUsers
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

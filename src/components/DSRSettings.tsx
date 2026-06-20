@@ -397,10 +397,26 @@ export default function DSRSettings({
                 {/* Table: Registered Users */}
                 <div className="lg:col-span-2 space-y-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Logged-In System Users ({allowedUsers.length})</span>
-                    <span className="text-[10px] text-gray-500 font-semibold pl-0.5">
-                      Note: New users can log in using their email address and are automatically registered. You can rename or assign human names to any user by typing directly into their name field below.
-                    </span>
+                    {(() => {
+                      const isUserAdmin = (email: string): boolean => {
+                        if (!email) return false;
+                        const emailLower = email.trim().toLowerCase();
+                        if (emailLower.includes("admin")) return true;
+                        if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
+                        const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
+                        if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
+                        return false;
+                      };
+                      const activeUsers = allowedUsers.filter(u => !isUserAdmin(u.email));
+                      return (
+                        <>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Logged-In System Users ({activeUsers.length})</span>
+                          <span className="text-[10px] text-gray-500 font-semibold pl-0.5">
+                            Note: Only authorized users registered here are allowed to log into the system. You can update names or revoke access at any time.
+                          </span>
+                        </>
+                      );
+                    })()}
                   </div>
                   
                   <div className="overflow-x-auto border border-gray-150 rounded-2xl bg-white max-h-96 overflow-y-auto">
@@ -409,47 +425,57 @@ export default function DSRSettings({
                         <tr className="border-b border-gray-150 bg-gray-50/70 text-[9px] font-bold text-gray-400 uppercase tracking-widest">
                           <th className="py-3 px-4 text-left">Employee Name</th>
                           <th className="py-3 px-4 text-left">Authorized Email</th>
-                          <th className="py-3 px-4 text-center">Submissions Logged</th>
+                          <th className="py-3 px-4 text-center">Last Logged In</th>
                           <th className="py-3 px-4 text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-105">
-                        {allowedUsers.map((u) => {
-                          const userSubmissions = entries.filter(e => e.userEmail?.toLowerCase() === u.email.toLowerCase()).length;
-                          return (
-                            <tr key={u.email} className="hover:bg-slate-50/45 transition text-xs">
-                              <td className="py-2 px-4 font-extrabold text-gray-900">
-                                <input
-                                  type="text"
-                                  value={u.name}
-                                  onChange={(e) => {
-                                    const nextName = e.target.value;
-                                    onSetAllowedUsers(prev => prev.map(item => item.email.toLowerCase() === u.email.toLowerCase() ? { ...item, name: nextName } : item));
-                                  }}
-                                  className="px-2 py-1.5 border border-gray-200/50 hover:border-indigo-300 focus:border-indigo-500 rounded bg-gray-50/20 focus:bg-white text-xs font-bold w-full transition outline-none"
-                                  placeholder="Assign Name..."
-                                />
-                              </td>
-                              <td className="py-3.5 px-4 font-mono font-semibold text-gray-500">{u.email}</td>
-                              <td className="py-3.5 px-4 text-center font-mono text-gray-500">{userSubmissions} Work Logs</td>
-                              <td className="py-3.5 px-4 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (window.confirm(`Revoke Work Log system access and delete identity mapping for: ${u.name}?`)) {
-                                      onSetAllowedUsers(prev => prev.filter(item => item.email.toLowerCase() !== u.email.toLowerCase()));
-                                      triggerAlert('success', `Revoked access for ${u.name}`);
-                                    }
-                                  }}
-                                  className="p-1 hover:bg-rose-50 text-gray-400 hover:text-rose-500 rounded transition cursor-pointer"
-                                  title="Revoke User"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {(() => {
+                          const isUserAdmin = (email: string): boolean => {
+                            if (!email) return false;
+                            const emailLower = email.trim().toLowerCase();
+                            if (emailLower.includes("admin")) return true;
+                            if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
+                            const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
+                            if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
+                            return false;
+                          };
+                          return allowedUsers.filter(u => !isUserAdmin(u.email)).map((u) => {
+                            return (
+                              <tr key={u.email} className="hover:bg-slate-50/45 transition text-xs">
+                                <td className="py-2 px-4 font-extrabold text-gray-900">
+                                  <input
+                                    type="text"
+                                    value={u.name}
+                                    onChange={(e) => {
+                                      const nextName = e.target.value;
+                                      onSetAllowedUsers(prev => prev.map(item => item.email.toLowerCase() === u.email.toLowerCase() ? { ...item, name: nextName } : item));
+                                    }}
+                                    className="px-2 py-1.5 border border-gray-200/50 hover:border-indigo-300 focus:border-indigo-500 rounded bg-gray-50/20 focus:bg-white text-xs font-bold w-full transition outline-none"
+                                    placeholder="Assign Name..."
+                                  />
+                                </td>
+                                <td className="py-3.5 px-4 font-mono font-semibold text-gray-500">{u.email}</td>
+                                <td className="py-3.5 px-4 text-center font-mono text-xs font-semibold text-gray-500">{u.lastLoggedIn || 'Never'}</td>
+                                <td className="py-3.5 px-4 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (window.confirm(`Revoke Work Log system access and delete identity mapping for: ${u.name}?`)) {
+                                        onSetAllowedUsers(prev => prev.filter(item => item.email.toLowerCase() !== u.email.toLowerCase()));
+                                        triggerAlert('success', `Revoked access for ${u.name}`);
+                                      }
+                                    }}
+                                    className="p-1 hover:bg-rose-50 text-gray-400 hover:text-rose-500 rounded transition cursor-pointer"
+                                    title="Revoke User"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>

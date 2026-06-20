@@ -43,6 +43,7 @@ interface DSRDashboardProps {
   alerts?: any[];
   onAddAlert?: (alert: any) => void;
   onUpdateProject?: (updatedProject: Project) => void;
+  adminEmails?: string[];
 }
 
 export default function DSRDashboard({ 
@@ -55,7 +56,8 @@ export default function DSRDashboard({
   customSubmissionTypes = [],
   alerts = [],
   onAddAlert,
-  onUpdateProject
+  onUpdateProject,
+  adminEmails = []
 }: DSRDashboardProps) {
   // Filter entries based on role representation (Admins see everything, regular users see only their own)
   const parsedEntries = useMemo(() => {
@@ -142,17 +144,26 @@ export default function DSRDashboard({
     return map;
   }, [allowedUsers, entries]);
 
-  // Unique list of all available user accounts for checklist selection
+  // Unique list of all available user accounts for checklist selection (excluding admins)
   const allUsersList = useMemo(() => {
     const emailMap = new Map<string, string>();
+    const isUserAdmin = (email: string) => {
+      const emailLower = email.trim().toLowerCase();
+      if (emailLower.includes("admin")) return true;
+      if (adminEmails && adminEmails.some(a => a.trim().toLowerCase() === emailLower)) return true;
+      const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
+      if (hardcodedAdmins.some((a) => a.trim().toLowerCase() === emailLower)) return true;
+      return false;
+    };
+
     allowedUsers.forEach(u => {
-      if (u.email && u.email.trim()) {
+      if (u.email && u.email.trim() && !isUserAdmin(u.email)) {
         emailMap.set(u.email.trim().toLowerCase(), u.name || u.email);
       }
     });
 
     entries.forEach(entry => {
-      if (entry && entry.userEmail) {
+      if (entry && entry.userEmail && !isUserAdmin(entry.userEmail)) {
         const email = entry.userEmail.trim().toLowerCase();
         if (!emailMap.has(email)) {
           emailMap.set(email, getUserDisplayName(email, allowedUsers));
@@ -164,7 +175,7 @@ export default function DSRDashboard({
       email,
       name
     })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [allowedUsers, entries]);
+  }, [allowedUsers, entries, adminEmails]);
 
   // Available locations list based on project locations in sheet
   const availableLocations = useMemo(() => {
@@ -962,7 +973,7 @@ export default function DSRDashboard({
         </div>
 
         {/* Filters Grid */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${isAdmin ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4 pt-1`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${isAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 pt-1`}>
           
           {/* Block 1: Date Filter */}
           <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
@@ -1127,107 +1138,12 @@ export default function DSRDashboard({
             </div>
           </div>
 
-          {/* Block 4: Project Location with search bar */}
-          <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1 leading-none">
-              <MapPin size={11} className="text-gray-400" />
-              Project Location
-            </span>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsLocationDropdownOpen(!isLocationDropdownOpen);
-                  setIsProjectDropdownOpen(false);
-                  setIsUserDropdownOpen(false);
-                }}
-                className="w-full flex items-center justify-between px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-950 font-bold focus:outline-none transition hover:bg-gray-50 h-[30px]"
-              >
-                <span className="truncate pr-1">
-                  {selectedLocations.length === 0 
-                    ? 'All Locations' 
-                    : `${selectedLocations.length} selected`}
-                </span>
-                <ChevronDown size={12} className={`text-gray-400 transition-transform shrink-0 ${isLocationDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isLocationDropdownOpen && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => setIsLocationDropdownOpen(false)} 
-                  />
-                  <div className="absolute right-0 left-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-2.5 space-y-2 max-h-56 overflow-y-auto">
-                    <div className="flex items-center justify-between text-[9px] pb-1 border-b border-gray-100 font-bold text-gray-400">
-                      <span>PROJECT LOCATIONS</span>
-                      <div className="flex gap-2">
-                        <button 
-                          type="button" 
-                          onClick={(e) => { e.stopPropagation(); setSelectedLocations([]); }} 
-                          className="text-indigo-600 hover:text-indigo-850"
-                        >
-                          Clear
-                        </button>
-                        <span>•</span>
-                        <button 
-                          type="button" 
-                          onClick={(e) => { e.stopPropagation(); setSelectedLocations([...availableLocations]); }} 
-                          className="text-indigo-600 hover:text-indigo-850"
-                        >
-                          All
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Small Search Bar */}
-                    <div className="relative" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="text"
-                        value={locationSearchTerm}
-                        onChange={(e) => setLocationSearchTerm(e.target.value)}
-                        placeholder="Search location..."
-                        className="w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 text-gray-950 placeholder-gray-400"
-                      />
-                    </div>
-
-                    <div className="space-y-0.5 max-h-36 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                      {availableLocations
-                        .filter(loc => loc.toLowerCase().includes(locationSearchTerm.toLowerCase()))
-                        .map((loc) => {
-                          const isChecked = selectedLocations.includes(loc);
-                          return (
-                            <div key={loc} className="flex items-center justify-between p-1 rounded hover:bg-gray-50 transition-colors">
-                              <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-800 font-bold grow select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {
-                                    if (isChecked) {
-                                      setSelectedLocations(selectedLocations.filter(item => item !== loc));
-                                    } else {
-                                      setSelectedLocations([...selectedLocations, loc]);
-                                    }
-                                  }}
-                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
-                                />
-                                <span>{loc}</span>
-                              </label>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Block 5: Filter by User (Admin Only) */}
+          {/* Block 5: Filter by User/Users (Admin Only) */}
           {isAdmin && (
             <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1 leading-none">
                 <Users size={11} className="text-gray-400" />
-                User Allocation
+                Users
               </span>
               <div className="relative">
                 <button
@@ -1254,8 +1170,8 @@ export default function DSRDashboard({
                       onClick={() => setIsUserDropdownOpen(false)} 
                     />
                     <div className="absolute right-0 left-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-2.5 space-y-2 max-h-56 overflow-y-auto">
-                      <div className="flex items-center justify-between text-[9px] pb-1 border-b border-gray-100 font-bold text-gray-400">
-                        <span>WORKERS</span>
+                      <div className="flex items-center justify-between text-[9px] pb-1 border-b border-gray-105 font-bold text-gray-400 font-sans">
+                        <span>USERS</span>
                         <div className="flex gap-2">
                           <button 
                             type="button" 
@@ -1281,7 +1197,7 @@ export default function DSRDashboard({
                           type="text"
                           value={userSearchTerm}
                           onChange={(e) => setUserSearchTerm(e.target.value)}
-                          placeholder="Search worker..."
+                          placeholder="Search user..."
                           className="w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 text-gray-950 placeholder-gray-400"
                         />
                       </div>
@@ -1321,38 +1237,6 @@ export default function DSRDashboard({
 
         </div>
       </div>
-
-      {/* Authorized Workspace Logins & Rosters (Only shown to Administrators) */}
-      {isAdmin && (
-        <div className="bg-white p-5 rounded-2xl border border-gray-150 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setShowRoster(!showRoster)}>
-            <div className="flex items-center gap-2">
-              <Users className="text-indigo-600 shrink-0" size={14} />
-              <span className="text-xs font-black text-gray-900 uppercase tracking-widest leading-none">Authorized Account Logins & Rosters ({allUsersList.length})</span>
-            </div>
-            <button className="text-[10px] font-black text-indigo-650 hover:text-indigo-850 bg-indigo-50/60 px-2.5 py-1 rounded-lg transition-all border border-indigo-100/40">
-              {showRoster ? 'Collapse Roster [-]' : 'Expand Roster [+]'}
-            </button>
-          </div>
-          
-          {showRoster && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2 animate-fade-in text-left">
-              {allUsersList.map((user) => {
-                return (
-                  <div key={user.email} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between text-xs hover:border-slate-300 hover:bg-slate-100/40 transition">
-                    <div className="space-y-0.5">
-                      <div className="font-extrabold text-gray-950 flex items-center gap-1.5">
-                        {user.name}
-                      </div>
-                      <div className="text-[10px] text-gray-500 font-mono">{user.email}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
 
       {/* 5 Horizontal Buttons Tab Selection Bar - Premium, Larger & Highly Professional */}

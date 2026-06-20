@@ -62,21 +62,7 @@ export default function App() {
 
   const [allowedUsers, setAllowedUsers] = useState<AppUser[]>(() => {
     const saved = localStorage.getItem('dsr_allowed_users');
-    const savedList: AppUser[] = saved ? JSON.parse(saved) : [];
-    
-    // Convert hardcoded defaults
-    const defaultUsers: AppUser[] = DEFAULT_ALLOWED_USERS.map((email) => ({
-      email,
-      name: email.includes('@') ? email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1) : email
-    }));
-
-    // Merge by unique email key
-    const uniqueMap = new Map<string, AppUser>();
-    [...defaultUsers, ...savedList].forEach(user => {
-      uniqueMap.set(user.email.toLowerCase().trim(), user);
-    });
-    
-    return Array.from(uniqueMap.values());
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [projectLocations, setProjectLocations] = useState<ProjectLocation[]>(() => {
@@ -568,11 +554,25 @@ export default function App() {
         localStorage.setItem('dsr_logged_role', 'admin');
         setActiveTab('dashboard');
       } else {
-        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower) ||
-                              DEFAULT_ALLOWED_USERS.some((u) => u.trim().toLowerCase() === emailLower);
+        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower);
         if (!isAllowedUser) {
           throw new Error(`Access Denied: The email "${emailLower}" is not authorized. Please contact your workspace administrator.`);
         }
+
+        const nowStr = new Date().toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+
+        setAllowedUsers(prev => prev.map(u => 
+          u.email.trim().toLowerCase() === emailLower 
+            ? { ...u, lastLoggedIn: nowStr }
+            : u
+        ));
 
         registerLoggedInUser(emailLower);
 
@@ -638,8 +638,7 @@ export default function App() {
 
         const isAdminEmail = adminEmails.some((a) => a.trim().toLowerCase() === userEmail) ||
                              ADMIN_EMAILS.some((a) => a.trim().toLowerCase() === userEmail);
-        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === userEmail) ||
-                              DEFAULT_ALLOWED_USERS.some((u) => u.trim().toLowerCase() === userEmail);
+        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === userEmail);
 
         let finalRole: 'user' | 'admin' | null = null;
         if (isAdminEmail) {
@@ -651,6 +650,22 @@ export default function App() {
         if (!finalRole) {
           await logout();
           throw new Error(`Access Denied: Google account "${userEmail}" is not authorized to access this workspace.`);
+        }
+
+        if (finalRole === 'user') {
+          const nowStr = new Date().toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          });
+          setAllowedUsers(prev => prev.map(u => 
+            u.email.trim().toLowerCase() === userEmail 
+              ? { ...u, lastLoggedIn: nowStr }
+              : u
+          ));
         }
 
         const matched = allowedUsers.find((u) => u.email.trim().toLowerCase() === userEmail);
@@ -1235,6 +1250,7 @@ export default function App() {
                   alerts={alerts}
                   onAddAlert={handleAddAlert}
                   onUpdateProject={handleUpdateProject}
+                  adminEmails={adminEmails}
                 />
               )}
 
