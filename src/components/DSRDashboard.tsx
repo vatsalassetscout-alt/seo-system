@@ -614,13 +614,16 @@ export default function DSRDashboard({
       }
 
       // Domain mapping
-      let domain = `${p.code.toLowerCase()}.com`;
-      if (p.id === 'proj-1') domain = 'phoenix-hub.com';
-      else if (p.id === 'proj-2') domain = 'alpha-marketing.io';
-      else if (p.id === 'proj-3') domain = 'zenith-logistics.net';
-      else if (p.id === 'proj-4') domain = 'polaris-systems.org';
-      else {
-        domain = p.name ? `${p.name.toLowerCase().trim().replace(/[^a-z0-9]/g, '-')}.com` : 'client-domain.com';
+      let domain = p.domain || '';
+      if (!domain) {
+        domain = `${p.code.toLowerCase()}.com`;
+        if (p.id === 'proj-1') domain = 'phoenix-hub.com';
+        else if (p.id === 'proj-2') domain = 'alpha-marketing.io';
+        else if (p.id === 'proj-3') domain = 'zenith-logistics.net';
+        else if (p.id === 'proj-4') domain = 'polaris-systems.org';
+        else {
+          domain = p.name ? `${p.name.toLowerCase().trim().replace(/[^a-z0-9]/g, '-')}.com` : 'client-domain.com';
+        }
       }
 
       return {

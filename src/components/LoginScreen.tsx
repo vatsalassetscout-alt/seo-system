@@ -4,51 +4,57 @@
  */
 
 import React, { useState } from 'react';
-import { FileSpreadsheet, Sparkles, KeyRound, ShieldAlert, ArrowRight, UserCheck } from 'lucide-react';
+import { KeyRound, ShieldAlert, ArrowRight, UserCheck } from 'lucide-react';
 import { motion } from 'motion/react';
-import { AppUser } from '../types';
 
 interface LoginScreenProps {
-  onLogin: (email: string, role: 'user' | 'admin') => void;
-  adminEmails: string[];
-  allowedUsers?: AppUser[];
-  onGoogleSignIn?: () => Promise<void>;
+  onLogin: (userId: string, role: 'user' | 'admin') => void;
   isLoggingIn?: boolean;
   loginError?: string | null;
 }
 
+// Credentials mapping specified by user
+const CREDENTIALS: Record<string, { passkey: string; role: 'user' | 'admin' }> = {
+  "1859": { passkey: "0069", role: "user" },
+  "9531": { passkey: "4949", role: "user" },
+  "5595": { passkey: "9231", role: "user" },
+  "4001": { passkey: "1793", role: "user" },
+  "8888": { passkey: "2010", role: "admin" }
+};
+
 export default function LoginScreen({
   onLogin,
-  adminEmails,
-  allowedUsers = [],
-  onGoogleSignIn,
   isLoggingIn = false,
   loginError = null,
 }: LoginScreenProps) {
-  const [activeTab, setActiveTab] = useState<'user' | 'admin'>('user');
-  const [emailInput, setEmailInput] = useState('');
+  const [idInput, setIdInput] = useState('');
+  const [passkeyInput, setPasskeyInput] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const email = emailInput.trim().toLowerCase();
-    
-    // Simple robust email validation regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email || !emailRegex.test(email)) {
-      setErrorMsg('Please enter a valid business email address (e.g., mail@company.com).');
+    const enteredId = idInput.trim();
+    const enteredPass = passkeyInput.trim();
+
+    if (!enteredId || !enteredPass) {
+      setErrorMsg('Please enter both User ID and Passkey.');
       return;
     }
 
-    // Determine the lowercase list of admin emails on the fly
-    const adminsLower = adminEmails.map(a => a.toLowerCase());
+    const matched = CREDENTIALS[enteredId];
+    if (!matched) {
+      setErrorMsg('Invalid User or Admin ID.');
+      return;
+    }
 
-    // Determine the lowercase list of allowed user emails on the fly
-    const usersLower = allowedUsers.map(u => u.email.toLowerCase());
+    if (matched.passkey !== enteredPass) {
+      setErrorMsg('Incorrect Passkey for this ID.');
+      return;
+    }
 
-    onLogin(email, activeTab);
+    onLogin(enteredId, matched.role);
   };
 
   const activeError = errorMsg || loginError;
@@ -74,44 +80,8 @@ export default function LoginScreen({
         {/* Main login card */}
         <div className="bg-white p-8 rounded-3xl border border-gray-150 shadow-md space-y-6 relative overflow-hidden">
           <div className="space-y-1.5 text-center">
-            <h2 className="text-base font-bold text-gray-900 font-sans">Authenticate session</h2>
-            <p className="text-xs text-gray-500">Sign in with email. Choose your access portal below.</p>
-          </div>
-
-          {/* Tab Control */}
-          <div className="grid grid-cols-2 gap-1 p-1 bg-gray-100 rounded-xl border border-gray-150">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('user');
-                setEmailInput('');
-                setErrorMsg(null);
-              }}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === 'user'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <UserCheck size={14} className={activeTab === 'user' ? 'text-indigo-600' : ''} />
-              User Portal
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('admin');
-                setEmailInput('');
-                setErrorMsg(null);
-              }}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === 'admin'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <KeyRound size={14} className={activeTab === 'admin' ? 'text-indigo-600' : ''} />
-              Admin Panel
-            </button>
+            <h2 className="text-base font-bold text-gray-900 font-sans">Authenticate Session</h2>
+            <p className="text-xs text-gray-500">Sign in using your assigned User ID and Passkey.</p>
           </div>
 
           {activeError && (
@@ -122,21 +92,39 @@ export default function LoginScreen({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="login-email" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                {activeTab === 'admin' ? 'Administrator Email' : 'Reporter / User Email'}
+              <label htmlFor="login-id" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                User / Admin ID
               </label>
               <input
-                id="login-email"
-                type="email"
+                id="login-id"
+                type="text"
                 required
                 autoFocus
-                placeholder={activeTab === 'admin' ? 'e.g. admin@company.com' : 'e.g. employee@company.com'}
-                value={emailInput}
+                placeholder="e.g. 1859"
+                value={idInput}
                 onChange={(e) => {
-                  setEmailInput(e.target.value);
+                  setIdInput(e.target.value);
                   setErrorMsg(null);
                 }}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 focus:border-indigo-600 rounded-xl text-gray-950 font-medium placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-650 transition text-sm sm:text-xs"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 focus:border-indigo-650 rounded-xl text-gray-950 font-semibold placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-650 transition text-sm sm:text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="login-passkey" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                Passkey
+              </label>
+              <input
+                id="login-passkey"
+                type="password"
+                required
+                placeholder="••••"
+                value={passkeyInput}
+                onChange={(e) => {
+                  setPasskeyInput(e.target.value);
+                  setErrorMsg(null);
+                }}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 focus:border-indigo-650 rounded-xl text-gray-950 font-semibold placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-650 transition text-sm sm:text-xs"
               />
             </div>
 
@@ -145,7 +133,7 @@ export default function LoginScreen({
               type="submit"
               className="w-full px-5 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition shadow-sm hover:shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
-              Enter {activeTab === 'admin' ? 'Administrator Workspace' : 'User Portal'}
+              Enter Workspace
               <ArrowRight size={13} />
             </button>
           </form>
@@ -155,10 +143,10 @@ export default function LoginScreen({
         {/* Security / Sheets info indicator footer */}
         <div className="flex items-center justify-center gap-4 text-[10px] text-gray-400 font-semibold font-mono">
           <span className="flex items-center gap-1">
-            <ShieldAlert size={12} /> Sandbox active
+            <ShieldAlert size={12} /> Secure login session
           </span>
           <span>•</span>
-          <span>Sheets layout configured</span>
+          <span>Google Sheets Backend active</span>
         </div>
       </motion.div>
     </div>

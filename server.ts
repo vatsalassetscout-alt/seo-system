@@ -7,6 +7,16 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// =========================================================================
+// DIRECT GOOGLE SHEETS PIPELINE CONFIGURATION (NOT IN ENV, ENTER HERE DIRECTLY)
+// =========================================================================
+// ⚠️ You can directly write your Google Sheets configurations inside the code!
+// Leaving these empty ("") will automatically fall back to environment variables and headers.
+const DIRECT_GOOGLE_API_KEY: string = ""; // 👈 Put your Google Sheets API Key here (e.g. "AIzaSy...")
+const DIRECT_SPREADSHEET_ID: string = ""; // 👈 Put your primary Google Sheet ID/Spreadsheet ID here
+const DIRECT_PROJECTS_SHEET_NAME: string = "Projects_Mapping"; // 👈 Tab name containing projects list
+const DIRECT_DSR_LOGS_SHEET_NAME: string = "DSR_Logs"; // 👈 Tab name containing log sheets rows
+
 const app = express();
 const PORT = 3000;
 
@@ -67,6 +77,11 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
 };
 
 const getGoogleAuth = async (req: any): Promise<{ token: string; isApiKey: boolean } | null> => {
+  // 0. Check directly hardcoded API Key first
+  if (DIRECT_GOOGLE_API_KEY && DIRECT_GOOGLE_API_KEY.trim()) {
+    return { token: DIRECT_GOOGLE_API_KEY.trim(), isApiKey: true };
+  }
+
   // 1. Check if client passed a custom API Key via the header
   const clientApiKey = req.headers['x-google-api-key'];
   if (clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim()) {
@@ -621,6 +636,11 @@ app.post("/api/auth/verify", (req, res) => {
 });
 
 const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null => {
+  // 0. Check directly hardcoded Spreadsheet ID first
+  if (DIRECT_SPREADSHEET_ID && DIRECT_SPREADSHEET_ID.trim()) {
+    return DIRECT_SPREADSHEET_ID.trim();
+  }
+
   // Always prioritize environment variables if configured
   const envId = type === 'projects' ? process.env.GOOGLE_PROJECTS_SPREADSHEET_ID : process.env.GOOGLE_LOGS_SPREADSHEET_ID;
   if (envId && envId.trim()) {
@@ -639,6 +659,20 @@ const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null =>
   }
 
   return null;
+};
+
+const getProjectsTab = (req: any): string => {
+  if (DIRECT_PROJECTS_SHEET_NAME && DIRECT_PROJECTS_SHEET_NAME.trim()) {
+    return DIRECT_PROJECTS_SHEET_NAME.trim();
+  }
+  return (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
+};
+
+const getSubmissionsTab = (req: any): string => {
+  if (DIRECT_DSR_LOGS_SHEET_NAME && DIRECT_DSR_LOGS_SHEET_NAME.trim()) {
+    return DIRECT_DSR_LOGS_SHEET_NAME.trim();
+  }
+  return (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
 };
 
 // Config diagnostics status route
@@ -663,19 +697,40 @@ app.get("/api/projects", async (req, res) => {
   try {
     const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'projects');
-    const projectsTab = (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
+    const projectsTab = getProjectsTab(req);
 
+    let list = [];
     if (auth && spreadsheetId) {
-      const list = await syncProjects(auth, spreadsheetId, projectsTab);
-      return res.json(list);
+      list = await syncProjects(auth, spreadsheetId, projectsTab);
+    } else {
+      list = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
     }
 
-    const list = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+    // Filter projects for non-admins if x-user-email is passed
+    const clientUserEmail = req.headers['x-user-email'];
+    const clientUserRole = req.headers['x-user-role'];
+    if (clientUserEmail && typeof clientUserEmail === 'string' && clientUserRole !== 'admin') {
+      const emailLower = clientUserEmail.trim().toLowerCase();
+      list = list.filter((p: any) => {
+        const assigned = Array.isArray(p.users) ? p.users : [];
+        return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+      });
+    }
+
     return res.json(list);
   } catch (err: any) {
     console.error("GET /api/projects error:", err);
     try {
-      const list = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+      let list = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
+      const clientUserEmail = req.headers['x-user-email'];
+      const clientUserRole = req.headers['x-user-role'];
+      if (clientUserEmail && typeof clientUserEmail === 'string' && clientUserRole !== 'admin') {
+        const emailLower = clientUserEmail.trim().toLowerCase();
+        list = list.filter((p: any) => {
+          const assigned = Array.isArray(p.users) ? p.users : [];
+          return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+        });
+      }
       return res.json(list);
     } catch {
       return res.json(defaultProjects);
@@ -727,8 +782,8 @@ app.get("/api/filters", async (req, res) => {
     let projectsArr = [];
     const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'projects');
-    const projectsTab = (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
-    const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
+    const projectsTab = getProjectsTab(req);
+    const submissionsTab = getSubmissionsTab(req);
 
     if (auth && spreadsheetId) {
       projectsArr = await syncProjects(auth, spreadsheetId, projectsTab);
@@ -738,6 +793,17 @@ app.get("/api/filters", async (req, res) => {
       } catch {
         projectsArr = [...defaultProjects];
       }
+    }
+
+    // Filter projects for non-admins if x-user-email is passed
+    const clientUserEmail = req.headers['x-user-email'];
+    const clientUserRole = req.headers['x-user-role'];
+    if (clientUserEmail && typeof clientUserEmail === 'string' && clientUserRole !== 'admin') {
+      const emailLower = clientUserEmail.trim().toLowerCase();
+      projectsArr = projectsArr.filter((p: any) => {
+        const assigned = Array.isArray(p.users) ? p.users : [];
+        return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+      });
     }
 
     const uniqueLocations = new Set<string>();
@@ -833,7 +899,7 @@ app.get("/api/submissions", async (req, res) => {
   try {
     const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'logs');
-    const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
+    const submissionsTab = getSubmissionsTab(req);
 
     if (auth && spreadsheetId) {
       const list = await syncSubmissions(auth, spreadsheetId, submissionsTab);
@@ -888,7 +954,7 @@ app.post("/api/submissions/append", async (req, res) => {
 
     const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'logs');
-    const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
+    const submissionsTab = getSubmissionsTab(req);
 
     if (auth && spreadsheetId && !auth.isApiKey) {
       const sheetName = submissionsTab;

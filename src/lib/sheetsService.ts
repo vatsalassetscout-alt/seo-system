@@ -48,21 +48,75 @@ export async function fetchProjectsFromSheet(
     
     if (rows.length === 0) {
       // Auto-initialize headers if the sheet is completely empty
-      await initSheetHeaders(cleanId, sheetName, ['Project ID', 'Project Name', 'Project Code', 'Description'], token);
+      await initSheetHeaders(cleanId, sheetName, ['Project Name', 'Domain', 'Location', 'Region', 'Users', 'Keyword1', 'Keyword2', 'Keyword3', 'Keyword4', 'Keyword5', 'Keyword6', 'Keyword7', 'Keyword8'], token);
       return [];
     }
 
-    // Skip header row
+    const headers = rows[0] || [];
+    const normalizedHeaders = headers.map((h: any) => String(h || '').toLowerCase().trim());
+
+    // Auto-detect indices for absolute custom column flexibility
+    const colIdx = {
+      domain: normalizedHeaders.findIndex(h => h.includes('domain') || h.includes('website') || h.includes('url') || h.includes('link')),
+      name: normalizedHeaders.findIndex(h => h.includes('project') || h.includes('name') || h === 'title'),
+      location: normalizedHeaders.findIndex(h => h.includes('location') || h.includes('city') || h.includes('office')),
+      region: normalizedHeaders.findIndex(h => h.includes('region') || h.includes('zone') || h === 'area'),
+      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee'))
+    };
+
+    // Find up to 8 keyword columns
+    const keywordColIdxs: number[] = [];
+    normalizedHeaders.forEach((h, idx) => {
+      if (h.includes('keyword')) {
+        keywordColIdxs.push(idx);
+      }
+    });
+
     const projectRows = rows.slice(1);
-    
-    const mappedProjects: Project[] = projectRows
-      .filter(row => row[0] && row[1]) // Must have ID and Name
-      .map(row => ({
-        id: row[0].trim(),
-        name: row[1].trim(),
-        code: (row[2] || '').trim().toUpperCase(),
-        description: (row[3] || '').trim(),
-      }));
+    const mappedProjects: Project[] = projectRows.map((row: any[]) => {
+      const getVal = (idx: number, fallback: string = "") => {
+        return (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : fallback;
+      };
+
+      const domain = getVal(colIdx.domain);
+      const name = getVal(colIdx.name, domain || "Unnamed Project");
+      
+      const cleanDomain = domain.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const id = cleanDomain || cleanName || `p-${Math.random().toString(36).substr(2, 9)}`;
+      const code = name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || "PROJ";
+
+      const location = getVal(colIdx.location, "Mumbai");
+      const region = getVal(colIdx.region, "West");
+      const usersStr = getVal(colIdx.users);
+      const description = "";
+
+      const usersList = usersStr 
+        ? usersStr.split(/[,;|]/).map((u: string) => u.trim().toLowerCase()).filter(Boolean) 
+        : [];
+
+      const keywords: string[] = [];
+      keywordColIdxs.forEach(idx => {
+        const val = getVal(idx);
+        if (val && keywords.length < 8) {
+          keywords.push(val);
+        }
+      });
+
+      return {
+        id,
+        domain,
+        name,
+        code,
+        location,
+        region,
+        users: usersList,
+        description,
+        priority: "",
+        frequency: "",
+        keywords
+      };
+    }).filter((p: Project) => p.name);
 
     return mappedProjects;
   } catch (error) {

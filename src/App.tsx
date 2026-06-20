@@ -270,11 +270,19 @@ export default function App() {
             token
           );
           if (loadedProjects && Array.isArray(loadedProjects)) {
-            setProjects(loadedProjects);
-            localStorage.setItem('dsr_projects', JSON.stringify(loadedProjects));
+            let finalProjects = loadedProjects;
+            if (currentUserRole !== 'admin' && currentUserEmail) {
+              const emailLower = currentUserEmail.trim().toLowerCase();
+              finalProjects = loadedProjects.filter((p: any) => {
+                const assigned = Array.isArray(p.users) ? p.users : [];
+                return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+              });
+            }
+            setProjects(finalProjects);
+            localStorage.setItem('dsr_projects', JSON.stringify(finalProjects));
 
             // Sync locations from spreadsheet fields
-            const locationsList = loadedProjects.map((p: any) => ({
+            const locationsList = finalProjects.map((p: any) => ({
               projectId: p.id,
               north: p.location || "Mumbai",
               west: p.region || "West"
@@ -333,6 +341,12 @@ export default function App() {
       }
       syncHeaders["x-projects-tab"] = sheetSettings?.projectsTab || 'Projects_Mapping';
       syncHeaders["x-submissions-tab"] = sheetSettings?.submissionsTab || 'DSR_Logs';
+      if (currentUserEmail) {
+        syncHeaders["x-user-email"] = currentUserEmail;
+      }
+      if (currentUserRole) {
+        syncHeaders["x-user-role"] = currentUserRole;
+      }
 
       // 3. Fetch consolidated filters from backend if available
       try {
