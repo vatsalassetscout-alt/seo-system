@@ -270,7 +270,53 @@ export default function App() {
   const syncWithBackend = async () => {
     setIsSyncing(true);
     try {
-      // Sync access configuration list from the backend source of truth
+      const token = await getAccessToken();
+      const pSpreadsheetId = sheetSettings?.projectsSpreadsheetId || sheetSettings?.spreadsheetId;
+      const lSpreadsheetId = sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId;
+
+      // 1. Direct client-side Sheets API querying if token and spreadsheet ID are present
+      if (token && pSpreadsheetId) {
+        try {
+          console.log("Client-side direct Sheets query for projects initiated...");
+          const loadedProjects = await fetchProjectsFromSheet(
+            pSpreadsheetId,
+            sheetSettings?.projectsTab || 'Projects_Mapping',
+            token
+          );
+          if (loadedProjects && Array.isArray(loadedProjects)) {
+            setProjects(loadedProjects);
+            localStorage.setItem('dsr_projects', JSON.stringify(loadedProjects));
+
+            // Sync locations from spreadsheet fields
+            const locationsList = loadedProjects.map((p: any) => ({
+              projectId: p.id,
+              north: p.location || "Mumbai",
+              west: p.region || "West"
+            }));
+            setProjectLocations(locationsList);
+            localStorage.setItem('dsr_project_locations', JSON.stringify(locationsList));
+          }
+        } catch (directProjErr) {
+          console.warn("Direct projects sheet query fell back/deferred:", directProjErr);
+        }
+
+        try {
+          console.log("Client-side direct Sheets query for submissions initiated...");
+          const loadedEntries = await fetchSubmissionsFromSheet(
+            lSpreadsheetId || pSpreadsheetId,
+            sheetSettings?.submissionsTab || 'DSR_Logs',
+            token
+          );
+          if (loadedEntries && Array.isArray(loadedEntries)) {
+            setEntries(loadedEntries);
+            localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
+          }
+        } catch (directSubErr) {
+          console.warn("Direct submissions sheet query fell back/deferred:", directSubErr);
+        }
+      }
+
+      // 2. Fetch access configurations from backend if available (otherwise utilize standard credentials)
       try {
         const authConfRes = await fetch("/api/auth/config");
         if (authConfRes.ok) {
@@ -286,10 +332,10 @@ export default function App() {
           }
         }
       } catch (authErr) {
-        console.warn("Failed to fetch server auth config:", authErr);
+        console.warn("Express auth config endpoint deferred:", authErr);
       }
 
-       const syncHeaders: Record<string, string> = {};
+      const syncHeaders: Record<string, string> = {};
       if (sheetSettings?.projectsSpreadsheetId) {
         syncHeaders["x-projects-spreadsheet-id"] = sheetSettings.projectsSpreadsheetId;
       }
@@ -302,62 +348,74 @@ export default function App() {
       syncHeaders["x-projects-tab"] = sheetSettings?.projectsTab || 'Projects_Mapping';
       syncHeaders["x-submissions-tab"] = sheetSettings?.submissionsTab || 'DSR_Logs';
 
-      // 1. Fetch Consolidated Dynamic Filters & Spreadsheet configurations
-      const filterRes = await fetch("/api/filters", { headers: syncHeaders });
-      if (filterRes.ok) {
-        const filterData = await filterRes.json();
-        if (filterData) {
-          if (filterData.projects && Array.isArray(filterData.projects)) {
-            setProjects(filterData.projects);
-            localStorage.setItem('dsr_projects', JSON.stringify(filterData.projects));
-            
-            // Sync locations from spreadsheet fields
-            const locationsList = filterData.projects.map((p: any) => ({
-              projectId: p.id,
-              north: p.location || "Mumbai",
-              west: p.region || "West"
-            }));
-            setProjectLocations(locationsList);
-            localStorage.setItem('dsr_project_locations', JSON.stringify(locationsList));
-          }
+      // 3. Fetch consolidated filters from backend if available
+      try {
+        const filterRes = await fetch("/api/filters", { headers: syncHeaders });
+        if (filterRes.ok) {
+          const filterData = await filterRes.json();
+          if (filterData) {
+            if (!token && filterData.projects && Array.isArray(filterData.projects)) {
+              setProjects(filterData.projects);
+              localStorage.setItem('dsr_projects', JSON.stringify(filterData.projects));
+              
+              const locationsList = filterData.projects.map((p: any) => ({
+                projectId: p.id,
+                north: p.location || "Mumbai",
+                west: p.region || "West"
+              }));
+              setProjectLocations(locationsList);
+              localStorage.setItem('dsr_project_locations', JSON.stringify(locationsList));
+            }
 
-          if (filterData.users && Array.isArray(filterData.users)) {
-            setAllowedUsers(filterData.users);
-            localStorage.setItem('dsr_allowed_users', JSON.stringify(filterData.users));
+            if (filterData.users && Array.isArray(filterData.users)) {
+              const defaultUsers: AppUser[] = DEFAULT_ALLOWED_USERS.map((email) => ({
+                email,
+                name: email.includes('@') ? email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1) : email
+              }));
+              const uniqueMap = new Map<string, AppUser>();
+              [...defaultUsers, ...filterData.users].forEach(user => {
+                uniqueMap.set(user.email.toLowerCase().trim(), user);
+              });
+              const mergedUsers = Array.from(uniqueMap.values());
+              setAllowedUsers(mergedUsers);
+              localStorage.setItem('dsr_allowed_users', JSON.stringify(mergedUsers));
+            }
           }
         }
-      } else {
-        // Fallback to individual projects fetch if not supported
-        const projRes = await fetch("/api/projects", { headers: syncHeaders });
-        if (projRes.ok) {
-          const loadedProjects = await projRes.json();
-          if (loadedProjects && Array.isArray(loadedProjects)) {
-            setProjects(loadedProjects);
-            localStorage.setItem('dsr_projects', JSON.stringify(loadedProjects));
+      } catch (errFilter) {
+        console.warn("Express filters endpoint deferred:", errFilter);
+      }
+
+      // 4. Fetch submissions from backend as fallbacks if direct token-fetching was not performed
+      if (!token) {
+        try {
+          const subRes = await fetch("/api/submissions", { headers: syncHeaders });
+          if (subRes.ok) {
+            const loadedEntries = await subRes.json();
+            if (loadedEntries && Array.isArray(loadedEntries)) {
+              setEntries(loadedEntries);
+              localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
+            }
           }
+        } catch (subErr) {
+          console.warn("Express submissions endpoint deferred:", subErr);
         }
       }
 
-      // 2. Fetch Submissions (Logs)
-      const subRes = await fetch("/api/submissions", { headers: syncHeaders });
-      if (subRes.ok) {
-        const loadedEntries = await subRes.json();
-        if (loadedEntries && Array.isArray(loadedEntries)) {
-          setEntries(loadedEntries);
-          localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
+      // 5. Fetch alerts
+      try {
+        const alertRes = await fetch("/api/alerts");
+        if (alertRes.ok) {
+          const loadedAlerts = await alertRes.json();
+          if (loadedAlerts && Array.isArray(loadedAlerts)) {
+            setAlerts(loadedAlerts);
+          }
         }
-      }
-
-      // 3. Fetch Alerts
-      const alertRes = await fetch("/api/alerts");
-      if (alertRes.ok) {
-        const loadedAlerts = await alertRes.json();
-        if (loadedAlerts && Array.isArray(loadedAlerts)) {
-          setAlerts(loadedAlerts);
-        }
+      } catch (alertErr) {
+        console.warn("Express alerts endpoint deferred:", alertErr);
       }
     } catch (err) {
-      console.warn("Express Sheets DB sync failed, running local caches:", err);
+      console.warn("Express Sheets DB sync background failed, using local/browser storage:", err);
     } finally {
       setIsSyncing(false);
     }
@@ -497,39 +555,42 @@ export default function App() {
     setIsLoggingIn(true);
 
     try {
-      // Validate with backend auth structure
-      const res = await fetch("/api/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailLower })
-      });
+      if (role === 'admin') {
+        const isAdminEmail = adminEmails.some((a) => a.trim().toLowerCase() === emailLower) ||
+                             ADMIN_EMAILS.some((a) => a.trim().toLowerCase() === emailLower);
+        if (!isAdminEmail) {
+          throw new Error(`Access Denied: The email "${emailLower}" is not registered as an Administrator.`);
+        }
 
-      const bodyText = await res.text();
-      let data: any;
-      try {
-        data = JSON.parse(bodyText);
-      } catch (jsonErr) {
-        throw new Error(`The workspace server returned an unexpected response format (Status: ${res.status}). Please try refreshing the page.`);
+        registerLoggedInUser(emailLower);
+        setCurrentUserEmail(emailLower);
+        setCurrentUserRole('admin');
+        localStorage.setItem('dsr_logged_role', 'admin');
+        setActiveTab('dashboard');
+      } else {
+        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower) ||
+                              DEFAULT_ALLOWED_USERS.some((u) => u.trim().toLowerCase() === emailLower);
+        if (!isAllowedUser) {
+          throw new Error(`Access Denied: The email "${emailLower}" is not authorized. Please contact your workspace administrator.`);
+        }
+
+        registerLoggedInUser(emailLower);
+
+        // Fetch name and details safely even if not in the main allowed list yet
+        const updatedAllowedUsers = [...allowedUsers];
+        const matched = updatedAllowedUsers.find((u) => u.email.trim().toLowerCase() === emailLower) || {
+          email: emailLower,
+          name: emailLower.includes('@') ? emailLower.split('@')[0].charAt(0).toUpperCase() + emailLower.split('@')[0].slice(1) : emailLower
+        };
+        const resolvedName = matched.name;
+
+        setCurrentUserEmail(emailLower);
+        setCurrentUserRole('user');
+        localStorage.setItem('dsr_logged_role', 'user');
+        setActiveTab('submit');
       }
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Login attempt rejected. Email not authorized.");
-      }
-
-      const actualRole = data.role as 'user' | 'admin';
-
-      if (role === 'admin' && actualRole !== 'admin') {
-        throw new Error("Access Denied: This email account is not registered as an Administrator.");
-      }
-
-      // Save user to memory/state instantly
-      registerLoggedInUser(emailLower);
-      setCurrentUserEmail(emailLower);
-      setCurrentUserRole(role);
-      localStorage.setItem('dsr_logged_role', role);
-      setActiveTab(role === 'admin' ? 'dashboard' : 'submit');
-
-      // Attempt background backend synchronisation for active state updates without blocking login UI or crashing
+      // Attempt background backend synchronization without blocking
       syncWithBackend().catch((err) => {
         console.warn("Background sheet sync was deferred on login:", err);
       });
@@ -574,45 +635,32 @@ export default function App() {
       const result = await googleSignIn();
       if (result && result.user && result.user.email) {
         const userEmail = result.user.email.trim().toLowerCase();
-        
-        // Verify via backend
-        const res = await fetch("/api/auth/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: userEmail })
-        });
 
-        const bodyText = await res.text();
-        let data: any;
-        try {
-          data = JSON.parse(bodyText);
-        } catch (jsonErr) {
+        const isAdminEmail = adminEmails.some((a) => a.trim().toLowerCase() === userEmail) ||
+                             ADMIN_EMAILS.some((a) => a.trim().toLowerCase() === userEmail);
+        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === userEmail) ||
+                              DEFAULT_ALLOWED_USERS.some((u) => u.trim().toLowerCase() === userEmail);
+
+        let finalRole: 'user' | 'admin' | null = null;
+        if (isAdminEmail) {
+          finalRole = 'admin';
+        } else if (isAllowedUser) {
+          finalRole = 'user';
+        }
+
+        if (!finalRole) {
           await logout();
-          throw new Error(`The workspace server returned an unexpected response format (Status: ${res.status}).`);
+          throw new Error(`Access Denied: Google account "${userEmail}" is not authorized to access this workspace.`);
         }
 
-        if (!res.ok) {
-          await logout(); // invalidate local login since not accepted by backend
-          throw new Error(data?.error || "Google SSO account is not registered to enter workspace.");
-        }
+        const matched = allowedUsers.find((u) => u.email.trim().toLowerCase() === userEmail);
+        const resolvedName = matched ? matched.name : (result.user.displayName || getUserDisplayName(userEmail, allowedUsers));
 
-        // Update local credentials
-        if (data.allowedAdmins) setAdminEmails(data.allowedAdmins);
-        if (data.allowedUsers) {
-          setAllowedUsers(data.allowedUsers.map((u: string) => ({
-            email: u,
-            name: u.includes('@') ? u.split('@')[0].charAt(0).toUpperCase() + u.split('@')[0].slice(1) : u
-          })));
-        }
-
-        // Auto-register upon Google Sign-In
-        registerLoggedInUser(userEmail, result.user.displayName || undefined);
-
+        registerLoggedInUser(userEmail, resolvedName);
         setCurrentUserEmail(userEmail);
-        const actualRole = data.role as 'user' | 'admin';
-        setCurrentUserRole(actualRole);
-        localStorage.setItem('dsr_logged_role', actualRole);
-        setActiveTab(actualRole === "admin" ? 'dashboard' : 'submit');
+        setCurrentUserRole(finalRole);
+        localStorage.setItem('dsr_logged_role', finalRole);
+        setActiveTab(finalRole === 'admin' ? 'dashboard' : 'submit');
 
         await syncWithBackend();
       }
@@ -631,6 +679,9 @@ export default function App() {
   const handleAddDSR = async (worksData: Omit<ProjectWork, 'id'>[], date: string) => {
     if (!currentUserEmail) return;
 
+    // Resolve the user's assigned employee name (the correct name as in the sheet schema)
+    const resolvedName = getUserDisplayName(currentUserEmail, allowedUsers) || currentUserEmail;
+
     // Build the clean works subrecords with unique stable IDs
     const worksWithIds: ProjectWork[] = worksData.map((w, index) => ({
       ...w,
@@ -640,7 +691,7 @@ export default function App() {
     const newEntry: DSREntry = {
       id: `dsr-${Date.now()}`,
       date,
-      userEmail: currentUserEmail,
+      userEmail: resolvedName, // Store under the resolved employee name so local logs display it
       works: worksWithIds,
       createdAt: new Date().toISOString(),
     };
@@ -648,9 +699,33 @@ export default function App() {
     // Save locally immediately
     setEntries((prev) => [newEntry, ...prev]);
 
-    // Async write to sheets via service account proxy
+    // Send to Google Sheets (Client-direct priority, fallback to Express backend)
     try {
-       const appendHeaders: Record<string, string> = {
+      const token = await getAccessToken();
+      const sheetId = sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId;
+      const sheetName = sheetSettings?.submissionsTab || 'DSR_Logs';
+
+      if (token && sheetId) {
+        try {
+          console.log("Saving log directly to Google Sheet from browser...");
+          await appendSubmissionsToSheet(
+            sheetId,
+            sheetName,
+            worksData,
+            date,
+            resolvedName, // write resolved name to GSheet
+            token
+          );
+          console.log("Direct client append succeeded!");
+          await syncWithBackend().catch((e) => console.warn(e));
+          return;
+        } catch (directErr) {
+          console.warn("Direct client append failed, trying backend fallback:", directErr);
+        }
+      }
+
+      // Backend fallback pathway
+      const appendHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
       };
       if (sheetSettings?.projectsSpreadsheetId) {
@@ -663,7 +738,7 @@ export default function App() {
         appendHeaders['x-spreadsheet-id'] = sheetSettings.spreadsheetId;
       }
       appendHeaders["x-projects-tab"] = sheetSettings?.projectsTab || 'Projects_Mapping';
-      appendHeaders["x-submissions-tab"] = sheetSettings?.submissionsTab || 'DSR_Logs';
+      appendHeaders["x-submissions-tab"] = sheetName;
 
       await fetch('/api/submissions/append', {
         method: 'POST',
@@ -671,12 +746,12 @@ export default function App() {
         body: JSON.stringify({
           works: worksData,
           date,
-          userEmail: currentUserEmail,
+          userEmail: resolvedName, // Pass resolved name to backend
         }),
       });
-      await syncWithBackend();
+      await syncWithBackend().catch((e) => console.warn(e));
     } catch (err) {
-      console.warn('Backend sheets appending failed, saved locally:', err);
+      console.warn('Backend/direct sheets appending fell through, cached locally:', err);
     }
   };
 
