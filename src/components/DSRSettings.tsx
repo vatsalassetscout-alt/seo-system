@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Project, CustomSubmissionType, DSREntry, AppUser, ProjectLocation } from '../types';
 import {
   Plus,
@@ -100,12 +100,80 @@ export default function DSRSettings({
   onAddAlert = () => {},
 }: DSRSettingsProps) {
   // Navigation Tabs inside Settings Panel
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'admins' | 'assignments'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'admins' | 'assignments' | 'sheets'>('users');
 
   // Input states
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+
+  // Sheets settings states
+  const [projectsSpreadsheetId, setProjectsSpreadsheetId] = useState(sheetSettings?.projectsSpreadsheetId || sheetSettings?.spreadsheetId || '');
+  const [logsSpreadsheetId, setLogsSpreadsheetId] = useState(sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId || '');
+  const [projectsTab, setProjectsTab] = useState(sheetSettings?.projectsTab || 'Projects_Mapping');
+  const [submissionsTab, setSubmissionsTab] = useState(sheetSettings?.submissionsTab || 'DSR_Logs');
+  const [locationsTab, setLocationsTab] = useState(sheetSettings?.locationsTab || 'Locations');
+  
+  const [serviceAccountEmail, setServiceAccountEmail] = useState('');
+  const [serviceAccountConfigured, setServiceAccountConfigured] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [sheetsTesting, setSheetsTesting] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/config-status')
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Failed to load credentials detail');
+      })
+      .then(data => {
+        if (data && data.serviceAccountEmail) {
+          setServiceAccountEmail(data.serviceAccountEmail);
+          setServiceAccountConfigured(data.serviceAccountConfigured);
+        }
+      })
+      .catch(err => console.error("Could not fetch service account detail:", err));
+  }, []);
+
+  const handleCopyEmail = () => {
+    if (!serviceAccountEmail) return;
+    navigator.clipboard.writeText(serviceAccountEmail)
+      .then(() => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      });
+  };
+
+  const handleSaveSheetSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSheetsTesting(true);
+    try {
+      await onUpdateSheetSettings({
+        projectsSpreadsheetId: projectsSpreadsheetId.trim(),
+        logsSpreadsheetId: logsSpreadsheetId.trim(),
+        spreadsheetId: (projectsSpreadsheetId || logsSpreadsheetId).trim(),
+        projectsTab: projectsTab.trim(),
+        submissionsTab: submissionsTab.trim(),
+        locationsTab: locationsTab.trim(),
+        isConnected: true
+      });
+      triggerAlert('success', 'Google Spreadsheet IDs and tab names saved successfully!');
+      
+      // Delay slightly for State update to serialize
+      setTimeout(async () => {
+        try {
+          await onTriggerSync();
+          triggerAlert('success', 'Synchronisation completed successfully! Projects & submissions are loaded.');
+        } catch (syncErr: any) {
+          console.error(syncErr);
+          triggerAlert('error', `Spreadsheet IDs saved but Synchronisation failed. Make sure your Google Sheets are shared with the Google Service Account as Editor.`);
+        }
+      }, 300);
+    } catch (err: any) {
+      triggerAlert('error', `Failed to update settings: ${err.message || err}`);
+    } finally {
+      setSheetsTesting(false);
+    }
+  };
 
 
 
@@ -219,6 +287,18 @@ export default function DSRSettings({
         >
           <Lock size={15} />
           Assign Project
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('sheets')}
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
+            activeSubTab === 'sheets'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
+          }`}
+        >
+          <FileSpreadsheet size={15} />
+          Google Sheets Integration
         </button>
       </div>
 
@@ -654,6 +734,193 @@ export default function DSRSettings({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB 4: Google Sheets Integration */}
+        {activeSubTab === 'sheets' && (
+          <div className="space-y-8 animate-fade-in text-left">
+            <div>
+              <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2 border-b border-gray-100 pb-3">
+                <FileSpreadsheet className="text-emerald-600" size={16} />
+                Google Sheets Integration Setup
+              </h4>
+              <p className="text-gray-500 text-xs mt-2 leading-relaxed font-semibold">
+                Configure your spreadsheet IDs and sheets tab names dynamically to load your master projects list and synchronize your daily submissions back to Google Sheets.
+              </p>
+            </div>
+
+            {/* Instruction Card */}
+            <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-2xl space-y-3">
+              <div className="flex items-start gap-3">
+                <span className="text-base text-emerald-700 font-bold">📢</span>
+                <div className="space-y-1">
+                  <h5 className="font-extrabold text-emerald-950 text-xs uppercase tracking-wider">CRITICAL PRE-REQUISITE: GRANT COMPANION ACCESS</h5>
+                  <p className="text-[11px] text-emerald-850 leading-relaxed font-medium">
+                    Your Google Sheets must be shared with the centralized system service account. If they are not shared, Google API will block connection efforts with a <code className="bg-emerald-100/60 px-1 py-0.5 rounded font-mono font-bold text-emerald-950">403/404 Error</code>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2 bg-white/85 p-3 rounded-xl border border-emerald-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Service Account Email to Invite:</span>
+                  <div className="text-xs font-mono font-black text-slate-800 break-all select-all">
+                    {serviceAccountEmail || "Loading Google account identity..."}
+                  </div>
+                </div>
+                {serviceAccountEmail && (
+                  <button
+                    type="button"
+                    onClick={handleCopyEmail}
+                    className="shrink-0 flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check size={12} />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} />
+                        Copy Email
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              <div className="text-[10px] text-emerald-800 font-semibold leading-relaxed">
+                💡 <span className="font-bold">Instructions:</span> Open your Google Sheets, click the <span className="font-bold">"Share"</span> button, paste this service account email, and select <span className="font-bold">Editor</span> (this is required so the system can write submissions and logs).
+              </div>
+            </div>
+
+            {/* Connection Form */}
+            <form onSubmit={handleSaveSheetSettings} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                
+                {/* 1) Projects Spreadsheet ID */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-500 font-bold block uppercase tracking-wide">
+                    Projects Spreadsheet ID
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 1a2b3c4d5e6f7G8H9I0J-kLmNoPqRsTuVwXyZ"
+                    value={projectsSpreadsheetId}
+                    onChange={(e) => setProjectsSpreadsheetId(e.target.value.trim())}
+                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
+                  />
+                  <span className="text-[10px] text-gray-500 font-medium block leading-normal">
+                    The Spreadsheet containing your projects list. (Extract from URL: <span className="font-mono bg-slate-50 px-1 py-0.5 rounded text-gray-650 break-all">/spreadsheets/d/<b>[THIS_PART]</b>/edit</span>)
+                  </span>
+                </div>
+
+                {/* 2) Logs Spreadsheet ID */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-500 font-bold block uppercase tracking-wide">
+                    Logs/Submissions Spreadsheet ID
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 1a2b3c4d5e6f7G8H9I0J-kLmNoPqRsTuVwXyZ"
+                    value={logsSpreadsheetId}
+                    onChange={(e) => setLogsSpreadsheetId(e.target.value.trim())}
+                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
+                  />
+                  <span className="text-[10px] text-gray-500 font-medium block leading-normal">
+                    Can be identical to the Projects Spreadsheet ID if using different tabs within the same sheet.
+                  </span>
+                </div>
+
+              </div>
+
+              {/* Sheet/Tab configs */}
+              <div className="border-t border-gray-100 pt-5 space-y-4">
+                <h5 className="font-extrabold text-gray-800 text-[11px] uppercase tracking-wider">
+                  Spreadsheet Tab/Sheet Names
+                </h5>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Tab 1: Projects Tab */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
+                      Projects Sheet Tab
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Projects_Mapping"
+                      value={projectsTab}
+                      onChange={(e) => setProjectsTab(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Tab 2: Daily Logs Tab */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
+                      Daily Logs Sheet Tab
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. DSR_Logs"
+                      value={submissionsTab}
+                      onChange={(e) => setSubmissionsTab(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Tab 3: Locations Tab */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
+                      Locations Sheet Tab
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Locations"
+                      value={locationsTab}
+                      onChange={(e) => setLocationsTab(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
+                    />
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Status & Submit */}
+              <div className="border-t border-gray-100 pt-5 flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full ${sheetSettings?.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                  <span className="text-xs font-bold text-gray-700">
+                    Connection Status: {sheetSettings?.isConnected ? 'Active & Linked' : 'Disconnected / Not Configured'}
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={sheetsTesting || !projectsSpreadsheetId || !logsSpreadsheetId}
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-xs font-sans uppercase"
+                >
+                  {sheetsTesting ? (
+                    <>
+                      <RefreshCw className="animate-spin" size={13} />
+                      Saving & Synchronising Google Sheets...
+                    </>
+                  ) : (
+                    <>
+                      <FileSpreadsheet size={13} />
+                      Save & Synchronise Spreadsheet
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </form>
           </div>
         )}
 
