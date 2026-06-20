@@ -66,8 +66,40 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
   }
 };
 
+const getGoogleAuth = async (req: any): Promise<{ token: string; isApiKey: boolean } | null> => {
+  // 1. Check if client passed a custom API Key via the header
+  const clientApiKey = req.headers['x-google-api-key'];
+  if (clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim()) {
+    return { token: clientApiKey.trim(), isApiKey: true };
+  }
+
+  // 2. Check if a client OAuth Authorization header is passed
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.substring(7).trim();
+    if (bearerToken && bearerToken !== "undefined" && bearerToken !== "null" && bearerToken.length > 5) {
+      return { token: bearerToken, isApiKey: false };
+    }
+  }
+
+  // 3. Fallback to Server environment variables: GOOGLE_API_KEY
+  const envApiKey = process.env.GOOGLE_API_KEY;
+  if (envApiKey && envApiKey.trim()) {
+    return { token: envApiKey.trim(), isApiKey: true };
+  }
+
+  // 4. Finally, try standard service account if available in system environment
+  const token = await getGoogleAccessToken();
+  if (token) {
+    return { token, isApiKey: false };
+  }
+
+  return null;
+};
+
 const ensureSheetExists = async (token: string, spreadsheetId: string, title: string) => {
   try {
+    if (!token) return;
     const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
     const res = await fetch(checkUrl, {
       headers: { Authorization: `Bearer ${token}` }
@@ -110,16 +142,24 @@ const ensureSheetExists = async (token: string, spreadsheetId: string, title: st
   }
 };
 
-const fetchProjectsFromSheets = async (token: string, spreadsheetId: string, sheetName: string = "Projects_Mapping"): Promise<any[][]> => {
+const fetchProjectsFromSheets = async (auth: { token: string; isApiKey: boolean }, spreadsheetId: string, sheetName: string = "Projects_Mapping"): Promise<any[][]> => {
+  const cleanId = spreadsheetId.trim();
   const range = encodeURIComponent(`${sheetName}!A1:Z1000`);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+  const url = auth.isApiKey
+    ? `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}?key=${auth.token}`
+    : `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+
+  if (!auth.isApiKey) {
+    headers["Authorization"] = `Bearer ${auth.token}`;
+  }
 
   const res = await fetch(url, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -132,6 +172,7 @@ const fetchProjectsFromSheets = async (token: string, spreadsheetId: string, she
 };
 
 const seedProjectsToSheets = async (token: string, spreadsheetId: string, sheetName: string = "Projects_Mapping") => {
+  if (!token) return;
   await ensureSheetExists(token, spreadsheetId, sheetName);
   const headers = [
     "Project Name", "Domain", "Location", "Region", "Users", 
@@ -167,15 +208,17 @@ const seedProjectsToSheets = async (token: string, spreadsheetId: string, sheetN
   });
 };
 
-const syncProjects = async (token: string, spreadsheetId: string, sheetName: string = "Projects_Mapping") => {
+const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsheetId: string, sheetName: string = "Projects_Mapping") => {
   try {
-    await ensureSheetExists(token, spreadsheetId, sheetName);
-    let rows = await fetchProjectsFromSheets(token, spreadsheetId, sheetName);
+    if (!auth.isApiKey) {
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+    }
+    let rows = await fetchProjectsFromSheets(auth, spreadsheetId, sheetName);
     
-    if (rows.length <= 1) {
+    if (rows.length <= 1 && !auth.isApiKey) {
       console.log(`Projects sheet "${sheetName}" is empty, seeding defaults...`);
-      await seedProjectsToSheets(token, spreadsheetId, sheetName);
-      rows = await fetchProjectsFromSheets(token, spreadsheetId, sheetName);
+      await seedProjectsToSheets(auth.token, spreadsheetId, sheetName);
+      rows = await fetchProjectsFromSheets(auth, spreadsheetId, sheetName);
     }
 
     const headers = rows[0] || [];
@@ -271,17 +314,27 @@ const syncProjects = async (token: string, spreadsheetId: string, sheetName: str
   }
 };
 
-const fetchSubmissionsFromSheets = async (token: string, spreadsheetId: string, sheetName: string = "DSR_Logs"): Promise<any[][]> => {
-  await ensureSheetExists(token, spreadsheetId, sheetName);
+const fetchSubmissionsFromSheets = async (auth: { token: string; isApiKey: boolean }, spreadsheetId: string, sheetName: string = "DSR_Logs"): Promise<any[][]> => {
+  if (!auth.isApiKey) {
+    await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+  }
+  const cleanId = spreadsheetId.trim();
   const range = encodeURIComponent(`${sheetName}!A1:Z5000`);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+  const url = auth.isApiKey
+    ? `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}?key=${auth.token}`
+    : `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+
+  if (!auth.isApiKey) {
+    headers["Authorization"] = `Bearer ${auth.token}`;
+  }
 
   const res = await fetch(url, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    }
+    headers
   });
 
   if (!res.ok) {
@@ -373,11 +426,11 @@ const parseSubmissionsRows = (rows: string[][]): any[] => {
   return Object.values(groupedEntries).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
 };
 
-const syncSubmissions = async (token: string, spreadsheetId: string, sheetName: string = "DSR_Logs") => {
+const syncSubmissions = async (auth: { token: string; isApiKey: boolean }, spreadsheetId: string, sheetName: string = "DSR_Logs") => {
   try {
-    const rows = await fetchSubmissionsFromSheets(token, spreadsheetId, sheetName);
+    const rows = await fetchSubmissionsFromSheets(auth, spreadsheetId, sheetName);
     
-    if (rows.length === 0) {
+    if (rows.length === 0 && !auth.isApiKey) {
       console.log(`Headers empty in "${sheetName}", initializing DSR headers...`);
       const headers = [
         'DSR ID', 'Reporting Date', 'User Email', 'Project ID', 'Project Name',
@@ -389,7 +442,7 @@ const syncSubmissions = async (token: string, spreadsheetId: string, sheetName: 
       await fetch(url, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${auth.token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ values: [headers] })
@@ -583,12 +636,12 @@ app.get("/api/config-status", async (req, res) => {
 // GET All Projects
 app.get("/api/projects", async (req, res) => {
   try {
-    const token = await getGoogleAccessToken();
+    const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'projects');
     const projectsTab = (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
 
-    if (token && spreadsheetId) {
-      const list = await syncProjects(token, spreadsheetId, projectsTab);
+    if (auth && spreadsheetId) {
+      const list = await syncProjects(auth, spreadsheetId, projectsTab);
       return res.json(list);
     }
 
@@ -630,11 +683,11 @@ app.post("/api/projects", async (req, res) => {
 
     fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(list, null, 2));
 
-    const token = await getGoogleAccessToken();
+    const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'projects');
     const projectsTab = (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
-    if (token && spreadsheetId) {
-      await writeAllProjectsToSheets(token, spreadsheetId, list, projectsTab);
+    if (auth && spreadsheetId && !auth.isApiKey) {
+      await writeAllProjectsToSheets(auth.token, spreadsheetId, list, projectsTab);
     }
 
     return res.json({ success: true, list });
@@ -647,13 +700,13 @@ app.post("/api/projects", async (req, res) => {
 app.get("/api/filters", async (req, res) => {
   try {
     let projectsArr = [];
-    const token = await getGoogleAccessToken();
+    const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'projects');
     const projectsTab = (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
     const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
 
-    if (token && spreadsheetId) {
-      projectsArr = await syncProjects(token, spreadsheetId, projectsTab);
+    if (auth && spreadsheetId) {
+      projectsArr = await syncProjects(auth, spreadsheetId, projectsTab);
     } else {
       try {
         projectsArr = JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
@@ -675,11 +728,10 @@ app.get("/api/filters", async (req, res) => {
     });
 
     let submissionsArr = [];
-    const logsToken = await getGoogleAccessToken();
     const logsSpreadsheetId = getSpreadsheetId(req, 'logs');
 
-    if (logsToken && logsSpreadsheetId) {
-      submissionsArr = await syncSubmissions(logsToken, logsSpreadsheetId, submissionsTab);
+    if (auth && logsSpreadsheetId) {
+      submissionsArr = await syncSubmissions(auth, logsSpreadsheetId, submissionsTab);
     } else {
       try {
         submissionsArr = JSON.parse(fs.readFileSync(SUBMISSIONS_FALLBACK_FILE, "utf-8"));
@@ -722,12 +774,12 @@ app.get("/api/filters", async (req, res) => {
 // GET Submissions Logs
 app.get("/api/submissions", async (req, res) => {
   try {
-    const token = await getGoogleAccessToken();
+    const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'logs');
     const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
 
-    if (token && spreadsheetId) {
-      const list = await syncSubmissions(token, spreadsheetId, submissionsTab);
+    if (auth && spreadsheetId) {
+      const list = await syncSubmissions(auth, spreadsheetId, submissionsTab);
       return res.json(list);
     }
 
@@ -777,13 +829,13 @@ app.post("/api/submissions/append", async (req, res) => {
 
     fs.writeFileSync(SUBMISSIONS_FALLBACK_FILE, JSON.stringify(list, null, 2));
 
-    const token = await getGoogleAccessToken();
+    const auth = await getGoogleAuth(req);
     const spreadsheetId = getSpreadsheetId(req, 'logs');
     const submissionsTab = (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
 
-    if (token && spreadsheetId) {
+    if (auth && spreadsheetId && !auth.isApiKey) {
       const sheetName = submissionsTab;
-      await ensureSheetExists(token, spreadsheetId, sheetName);
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
 
       let projectsList: any[] = [];
       try {
@@ -830,7 +882,7 @@ app.post("/api/submissions/append", async (req, res) => {
       const sheetsAppendRes = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${auth.token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ values: rowsToWrite })
@@ -843,7 +895,7 @@ app.post("/api/submissions/append", async (req, res) => {
       }
     }
 
-    return res.json({ success: true, source: token && spreadsheetId ? "Google Sheets + Local Backup" : "Local File DB Only" });
+    return res.json({ success: true, source: auth && spreadsheetId ? (auth.isApiKey ? "Local Fallback Cache (Google API Key active for read)" : "Google Sheets + Local Backup") : "Local File DB Only" });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
