@@ -31,6 +31,7 @@ const DB_DIR = isServerless ? "/tmp" : path.join(process.cwd(), "data");
 const PROJECTS_FALLBACK_FILE = path.join(DB_DIR, "projects_fallback.json");
 const SUBMISSIONS_FALLBACK_FILE = path.join(DB_DIR, "submissions_fallback.json");
 const ALERTS_FALLBACK_FILE = path.join(DB_DIR, "alerts_fallback.json");
+const ACTIVITIES_FALLBACK_FILE = path.join(DB_DIR, "activities_fallback.json");
 
 // Ensure dynamic database folder exists securely
 try {
@@ -245,7 +246,8 @@ const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsh
       name: normalizedHeaders.findIndex(h => h.includes('project') || h.includes('name') || h === 'title'),
       location: normalizedHeaders.findIndex(h => h.includes('location') || h.includes('city') || h.includes('office')),
       region: normalizedHeaders.findIndex(h => h.includes('region') || h.includes('zone') || h === 'area'),
-      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee'))
+      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee')),
+      userId: normalizedHeaders.findIndex(h => h.includes('user id') || h.includes('userid') || h.includes('employee id') || h.includes('staff id') || h === 'uid' || h === 'id')
     };
 
     // Find all keyword column indices
@@ -284,6 +286,7 @@ const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsh
       const location = getVal(colIdx.location, "Mumbai");
       const region = getVal(colIdx.region, "West");
       const usersStr = getVal(colIdx.users);
+      const userId = getVal(colIdx.userId);
       const description = "";
 
       const localP = localProjMap.get(id);
@@ -311,6 +314,7 @@ const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsh
         location,
         region,
         users: usersList,
+        userId,
         description,
         priority,
         frequency,
@@ -318,8 +322,37 @@ const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsh
       };
     }).filter((p: any) => p.name);
 
-    fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(mapped, null, 2));
-    return mapped;
+    // Deduplicate and merge projects by id
+    const deduplicatedMap = new Map<string, any>();
+    mapped.forEach((p: any) => {
+      if (deduplicatedMap.has(p.id)) {
+        const existing = deduplicatedMap.get(p.id);
+        const combinedUsers = Array.from(new Set([
+          ...(existing.users || []),
+          ...(p.users || [])
+        ].map(u => String(u).trim().toLowerCase())));
+        const combinedKeywords = Array.from(new Set([
+          ...(existing.keywords || []),
+          ...(p.keywords || [])
+        ].map(k => String(k).trim())));
+
+        deduplicatedMap.set(p.id, {
+          ...existing,
+          ...p,
+          users: combinedUsers,
+          keywords: combinedKeywords.slice(0, 8),
+          location: existing.location !== "Mumbai" ? existing.location : p.location,
+          region: existing.region !== "West" ? existing.region : p.region,
+          userId: existing.userId || p.userId
+        });
+      } else {
+        deduplicatedMap.set(p.id, p);
+      }
+    });
+
+    const deduplicatedList = Array.from(deduplicatedMap.values());
+    fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(deduplicatedList, null, 2));
+    return deduplicatedList;
   } catch (err) {
     console.error("❌ Error syncing projects from Google Sheets, using local cache:", err);
     if (fs.existsSync(PROJECTS_FALLBACK_FILE)) {
@@ -524,6 +557,245 @@ const writeAllProjectsToSheets = async (token: string, spreadsheetId: string, pr
   }
 };
 
+const syncAlerts = async (auth: any, spreadsheetId: string): Promise<any[]> => {
+  const sheetName = "System_Alerts";
+  try {
+    if (!auth || !spreadsheetId) {
+      if (fs.existsSync(ALERTS_FALLBACK_FILE)) {
+        return JSON.parse(fs.readFileSync(ALERTS_FALLBACK_FILE, "utf-8"));
+      }
+      return [];
+    }
+
+    if (!auth.isApiKey) {
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+    }
+
+    const range = encodeURIComponent(`${sheetName}!A2:K1000`);
+    const url = auth.isApiKey
+      ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${auth.token}`
+      : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+
+    const res = await fetch(url, {
+      headers: auth.isApiKey ? {} : { Authorization: `Bearer ${auth.token}` }
+    });
+
+    if (res.ok) {
+      const data: any = await res.json();
+      const rows = data.values || [];
+      const list = rows.map((r: any) => ({
+        id: r[0] || `alert-${Date.now()}`,
+        alertType: r[1] || 'sticky_note',
+        userEmail: r[2] || '',
+        projectId: r[3] || '',
+        projectName: r[4] || '',
+        projectDomain: r[5] || '',
+        date: r[6] || '',
+        message: r[7] || '',
+        adminEmail: r[8] || '',
+        createdAt: r[9] || new Date().toISOString(),
+        read: r[10] === 'true'
+      }));
+      fs.writeFileSync(ALERTS_FALLBACK_FILE, JSON.stringify(list, null, 2));
+      return list;
+    }
+  } catch (err) {
+    console.error("Failed fetching alerts from sheet:", err);
+  }
+
+  if (fs.existsSync(ALERTS_FALLBACK_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(ALERTS_FALLBACK_FILE, "utf-8"));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const writeAllAlertsToSheet = async (token: string, spreadsheetId: string, list: any[]) => {
+  const sheetName = "System_Alerts";
+  try {
+    await ensureSheetExists(token, spreadsheetId, sheetName);
+    const headers = [
+      "ID",
+      "Alert Type",
+      "User Email",
+      "Project ID",
+      "Project Name",
+      "Project Domain",
+      "Date",
+      "Message",
+      "Admin Email",
+      "Created At",
+      "Read"
+    ];
+    const rows = [
+      headers,
+      ...list.map(a => [
+        a.id || '',
+        a.alertType || 'sticky_note',
+        a.userEmail || '',
+        a.projectId || '',
+        a.projectName || '',
+        a.projectDomain || '',
+        a.date || '',
+        a.message || '',
+        a.adminEmail || '',
+        a.createdAt || '',
+        String(!!a.read)
+      ])
+    ];
+
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1:K1000`)}:clear`;
+    await fetch(clearUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1`)}?valueInputOption=USER_ENTERED`;
+    await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ values: rows })
+    });
+  } catch (err) {
+    console.error("Failed writing alerts to sheet:", err);
+  }
+};
+
+const logActivityToSheet = async (req: any, email: string, eventType: string, details: string) => {
+  try {
+    const activity = {
+      id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      userEmail: email,
+      eventType,
+      details,
+      platform: "Web App"
+    };
+
+    let list: any[] = [];
+    if (fs.existsSync(ACTIVITIES_FALLBACK_FILE)) {
+      try {
+        list = JSON.parse(fs.readFileSync(ACTIVITIES_FALLBACK_FILE, "utf-8"));
+      } catch (err) {}
+    }
+    list.unshift(activity); // most recent first
+    if (list.length > 500) list = list.slice(0, 500); // cap at 500
+    fs.writeFileSync(ACTIVITIES_FALLBACK_FILE, JSON.stringify(list, null, 2));
+
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    const sheetName = "Activity_Logs";
+    if (auth && spreadsheetId && !auth.isApiKey) {
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+      const values = [[
+        activity.timestamp,
+        activity.userEmail,
+        activity.eventType,
+        activity.details,
+        activity.platform
+      ]];
+      const range = encodeURIComponent(`${sheetName}!A1`);
+      // check headers
+      const checkRangeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1:E1`)}`;
+      const checkRes = await fetch(checkRangeUrl, {
+        headers: { Authorization: `Bearer ${auth.token}` }
+      });
+      let headersExist = false;
+      if (checkRes.ok) {
+        const checkData: any = await checkRes.json();
+        if (checkData.values && checkData.values.length > 0) {
+          headersExist = true;
+        }
+      }
+      if (!headersExist) {
+        // write header first
+        const headersValue = [["Timestamp", "User Email", "Event Type", "Event Details", "Platform"]];
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1`)}?valueInputOption=USER_ENTERED`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${auth.token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ values: headersValue })
+        });
+      }
+
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+      await fetch(appendUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ values })
+      });
+    }
+  } catch (err) {
+    console.error("Failed to log activity to Google Sheet:", err);
+  }
+};
+
+const syncActivityLogs = async (auth: any, spreadsheetId: string): Promise<any[]> => {
+  const sheetName = "Activity_Logs";
+  try {
+    if (!auth || !spreadsheetId) {
+      if (fs.existsSync(ACTIVITIES_FALLBACK_FILE)) {
+        return JSON.parse(fs.readFileSync(ACTIVITIES_FALLBACK_FILE, "utf-8"));
+      }
+      return [];
+    }
+
+    if (!auth.isApiKey) {
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+    }
+
+    const range = encodeURIComponent(`${sheetName}!A2:E502`);
+    const url = auth.isApiKey
+      ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${auth.token}`
+      : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+
+    const res = await fetch(url, {
+      headers: auth.isApiKey ? {} : { Authorization: `Bearer ${auth.token}` }
+    });
+
+    if (res.ok) {
+      const data: any = await res.json();
+      const rows = data.values || [];
+      const list = rows.map((r: any, idx: number) => ({
+        id: `act-sync-${idx}`,
+        timestamp: r[0] || new Date().toISOString(),
+        userEmail: r[1] || "",
+        eventType: r[2] || "",
+        details: r[3] || "",
+        platform: r[4] || "Web App"
+      }));
+      // sort most recent first
+      list.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      if (list.length > 0) {
+        fs.writeFileSync(ACTIVITIES_FALLBACK_FILE, JSON.stringify(list, null, 2));
+      }
+      return list;
+    }
+  } catch (err) {
+    console.error("Failed syncing activity logs from sheet:", err);
+  }
+
+  if (fs.existsSync(ACTIVITIES_FALLBACK_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(ACTIVITIES_FALLBACK_FILE, "utf-8"));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 // Initialize dynamic local files on boot if empty
 try {
   let projectsList: any[] = [];
@@ -561,6 +833,14 @@ try {
   }
 } catch (e) {
   console.error("Warning: Could not seed ALERTS_FALLBACK_FILE:", e);
+}
+
+try {
+  if (!fs.existsSync(ACTIVITIES_FALLBACK_FILE)) {
+    fs.writeFileSync(ACTIVITIES_FALLBACK_FILE, JSON.stringify([], null, 2));
+  }
+} catch (e) {
+  console.error("Warning: Could not seed ACTIVITIES_FALLBACK_FILE:", e);
 }
 
 // 3. User Authorization Registry (Backend Lists)
@@ -626,6 +906,8 @@ app.post("/api/auth/verify", (req, res) => {
   const filteredUsers = ALLOWED_USERS
     .filter(u => !isUserAdmin(u))
     .map(u => cleanEmailToNameOrUsername(u));
+
+  logActivityToSheet(req, emailLower, "User Login", `Successfully logged in as ${isAdmin ? "Admin" : "Standard Employee"}`);
 
   return res.json({
     allowed: true,
@@ -770,6 +1052,9 @@ app.post("/api/projects", async (req, res) => {
       await writeAllProjectsToSheets(auth.token, spreadsheetId, list, projectsTab);
     }
 
+    const userEmail = req.headers['x-user-email'] || "Admin";
+    await logActivityToSheet(req, String(userEmail), `${action === 'add' ? 'CREATE' : action === 'edit' ? 'EDIT' : 'DELETE'} Project`, `${action === 'add' ? 'Created' : action === 'edit' ? 'Edited' : 'Deleted'} project: "${project?.name || project?.domain || 'unnamed'}"`);
+
     return res.json({ success: true, list });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -801,14 +1086,13 @@ app.get("/api/filters", async (req, res) => {
     if (clientUserEmail && typeof clientUserEmail === 'string' && clientUserRole !== 'admin') {
       const emailLower = clientUserEmail.trim().toLowerCase();
       projectsArr = projectsArr.filter((p: any) => {
-        const assigned = Array.isArray(p.users) ? p.users : [];
-        return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+        return p.userId && String(p.userId).trim().toLowerCase() === emailLower;
       });
     }
 
     const uniqueLocations = new Set<string>();
     const uniqueRegions = new Set<string>();
-    const uniqueUserNames = new Set<string>();
+    const userMap = new Map<string, string>();
 
     const formatUserEmailToName = (email: string): string => {
       if (!email) return "";
@@ -828,18 +1112,23 @@ app.get("/api/filters", async (req, res) => {
     projectsArr.forEach((p: any) => {
       if (p.location) uniqueLocations.add(p.location);
       if (p.region) uniqueRegions.add(p.region);
-      if (p.users && Array.isArray(p.users)) {
-        p.users.forEach((u: string) => {
-          const userStr = u.trim();
-          if (userStr && !isUserAdmin(userStr)) {
-            if (userStr.includes("@")) {
-              const formatted = formatUserEmailToName(userStr);
-              if (formatted) uniqueUserNames.add(formatted);
-            } else {
-              uniqueUserNames.add(userStr);
-            }
+      if (p.userId && String(p.userId).trim()) {
+        const uId = String(p.userId).trim().toLowerCase();
+        if (!isUserAdmin(uId)) {
+          let assignedName = "";
+          if (p.users && Array.isArray(p.users) && p.users.length > 0) {
+            assignedName = p.users.find((u: string) => !/^\d+$/.test(u.trim())) || p.users[0];
           }
-        });
+          if (!assignedName) {
+            assignedName = formatUserEmailToName(uId);
+          }
+          const formattedName = assignedName
+            .split(' ')
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          
+          userMap.set(uId, formattedName);
+        }
       }
     });
 
@@ -858,13 +1147,10 @@ app.get("/api/filters", async (req, res) => {
 
     submissionsArr.forEach((entry: any) => {
       if (entry.userEmail) {
-        const userStr = entry.userEmail.trim();
+        const userStr = entry.userEmail.trim().toLowerCase();
         if (userStr && !isUserAdmin(userStr)) {
-          if (userStr.includes("@")) {
-            const formatted = formatUserEmailToName(userStr);
-            if (formatted) uniqueUserNames.add(formatted);
-          } else {
-            uniqueUserNames.add(userStr);
+          if (!userMap.has(userStr)) {
+            userMap.set(userStr, formatUserEmailToName(userStr));
           }
         }
       }
@@ -876,10 +1162,10 @@ app.get("/api/filters", async (req, res) => {
       uniqueRegions.add("South");
     }
 
-    const finalUsers = Array.from(uniqueUserNames).map(user => {
+    const finalUsers = Array.from(userMap.entries()).map(([emailStr, nameStr]) => {
       return {
-        email: user,
-        name: user
+        email: emailStr,
+        name: nameStr
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1018,6 +1304,8 @@ app.post("/api/submissions/append", async (req, res) => {
       }
     }
 
+    await logActivityToSheet(req, userEmail, "DSR Submission", `Submitted Work Log for date ${date} containing ${works.length} project block(s).`);
+
     return res.json({ success: true, source: auth && spreadsheetId ? (auth.isApiKey ? "Local Fallback Cache (Google API Key active for read)" : "Google Sheets + Local Backup") : "Local File DB Only" });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1030,8 +1318,14 @@ app.delete("/api/submissions", (req, res) => {
 });
 
 // GET Alerts
-app.get("/api/alerts", (req, res) => {
+app.get("/api/alerts", async (req, res) => {
   try {
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    if (auth && spreadsheetId) {
+      const list = await syncAlerts(auth, spreadsheetId);
+      return res.json(list);
+    }
     const list = JSON.parse(fs.readFileSync(ALERTS_FALLBACK_FILE, "utf-8"));
     res.json(list);
   } catch {
@@ -1040,7 +1334,7 @@ app.get("/api/alerts", (req, res) => {
 });
 
 // POST alert notifications to admin
-app.post("/api/alerts", (req, res) => {
+app.post("/api/alerts", async (req, res) => {
   const { alert } = req.body;
   if (!alert) {
     return res.status(400).json({ error: "Missing alert data" });
@@ -1050,6 +1344,17 @@ app.post("/api/alerts", (req, res) => {
     const list = JSON.parse(fs.readFileSync(ALERTS_FALLBACK_FILE, "utf-8"));
     list.unshift(alert);
     fs.writeFileSync(ALERTS_FALLBACK_FILE, JSON.stringify(list, null, 2));
+
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    if (auth && spreadsheetId && !auth.isApiKey) {
+      await writeAllAlertsToSheet(auth.token, spreadsheetId, list);
+    }
+
+    // Capture activity
+    const adminEmail = req.headers['x-user-email'] || alert.adminEmail || "Admin";
+    await logActivityToSheet(req, String(adminEmail), "Create Note/Assignment", `Created notification assignment for ${alert.userEmail || 'all workers'} on project "${alert.projectName || alert.projectDomain || 'All'}"`);
+
     res.json(list);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1057,17 +1362,49 @@ app.post("/api/alerts", (req, res) => {
 });
 
 // POST Clear/Dismiss alerts
-app.post("/api/alerts/clear", (req, res) => {
+app.post("/api/alerts/clear", async (req, res) => {
   const { id, all } = req.body;
   try {
     let list = JSON.parse(fs.readFileSync(ALERTS_FALLBACK_FILE, "utf-8"));
+    const clearedItem = id ? list.find((a: any) => a.id === id) : null;
     if (all) {
       list = list.map((a: any) => ({ ...a, read: true }));
     } else if (id) {
       list = list.filter((a: any) => a.id !== id);
     }
     fs.writeFileSync(ALERTS_FALLBACK_FILE, JSON.stringify(list, null, 2));
+
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    if (auth && spreadsheetId && !auth.isApiKey) {
+      await writeAllAlertsToSheet(auth.token, spreadsheetId, list);
+    }
+
+    // Capture activity
+    const actorEmail = req.headers['x-user-email'] || "User";
+    await logActivityToSheet(req, String(actorEmail), "Clear Note/Assignment", all ? "Cleared all active stick-notes and assignments" : `Cleared notification assignment: "${clearedItem?.message || id}"`);
+
     res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Activity Logs
+app.get("/api/activity", async (req, res) => {
+  try {
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    if (auth && spreadsheetId) {
+      const list = await syncActivityLogs(auth, spreadsheetId);
+      return res.json(list);
+    }
+    
+    if (fs.existsSync(ACTIVITIES_FALLBACK_FILE)) {
+      const list = JSON.parse(fs.readFileSync(ACTIVITIES_FALLBACK_FILE, "utf-8"));
+      return res.json(list);
+    }
+    res.json([]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

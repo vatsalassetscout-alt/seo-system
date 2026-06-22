@@ -65,8 +65,18 @@ export default function DSRDashboard({
       return entries;
     }
     if (!currentUserEmail) return [];
-    return entries.filter(entry => entry.userEmail?.toLowerCase().trim() === currentUserEmail.toLowerCase().trim());
-  }, [entries, isAdmin, currentUserEmail]);
+    const emailLower = currentUserEmail.toLowerCase().trim();
+    const resolvedName = getUserDisplayName(currentUserEmail, allowedUsers).toLowerCase().trim();
+
+    return entries.filter(entry => {
+      if (!entry.userEmail) return false;
+      const entryEmailLower = entry.userEmail.toLowerCase().trim();
+      return entryEmailLower === emailLower || 
+             entryEmailLower === resolvedName || 
+             entryEmailLower.includes(emailLower) ||
+             resolvedName.includes(entryEmailLower);
+    });
+  }, [entries, isAdmin, currentUserEmail, allowedUsers]);
 
   // Frequency Period Selection Tab state (daily, weekly, monthly)
   const [freqFilterType, setFreqFilterType] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -138,7 +148,7 @@ export default function DSRDashboard({
 
     // Overwrite with absolute assigned names
     allowedUsers.forEach(u => {
-      map[u.email.trim().toLowerCase()] = u.name;
+      map[u.email.trim().toLowerCase()] = u.name || getUserDisplayName(u.email, allowedUsers);
     });
 
     return map;
@@ -149,7 +159,7 @@ export default function DSRDashboard({
     const emailMap = new Map<string, string>();
     const isUserAdmin = (email: string) => {
       const emailLower = email.trim().toLowerCase();
-      if (emailLower.includes("admin")) return true;
+      if (emailLower === '8888' || emailLower.includes("admin")) return true;
       if (adminEmails && adminEmails.some(a => a.trim().toLowerCase() === emailLower)) return true;
       const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
       if (hardcodedAdmins.some((a) => a.trim().toLowerCase() === emailLower)) return true;
@@ -158,7 +168,7 @@ export default function DSRDashboard({
 
     allowedUsers.forEach(u => {
       if (u.email && u.email.trim() && !isUserAdmin(u.email)) {
-        emailMap.set(u.email.trim().toLowerCase(), u.name || u.email);
+        emailMap.set(u.email.trim().toLowerCase(), u.name || getUserDisplayName(u.email, allowedUsers));
       }
     });
 
@@ -177,10 +187,44 @@ export default function DSRDashboard({
     })).sort((a, b) => a.name.localeCompare(b.name));
   }, [allowedUsers, entries, adminEmails]);
 
+  // User Projects based on logged-in user or admin's selected users filter
+  const userProjects = useMemo(() => {
+    if (!isAdmin) {
+      if (!currentUserEmail) return [];
+      const emailLower = currentUserEmail.trim().toLowerCase();
+      const nameLower = getUserDisplayName(currentUserEmail, allowedUsers).toLowerCase();
+      const prefix = emailLower.split('@')[0];
+      return projects.filter((p) => {
+        if (p.userId && String(p.userId).trim().toLowerCase() === emailLower) {
+          return true;
+        }
+        if (!p.users || !Array.isArray(p.users) || p.users.length === 0) return false;
+        return p.users.some((user: string) => {
+          const uLower = user.toLowerCase();
+          return uLower === emailLower || 
+                 uLower === nameLower || 
+                 uLower === prefix || 
+                 emailLower.includes(uLower) || 
+                 nameLower.includes(uLower);
+        });
+      });
+    }
+
+    if (selectedUsers.length > 0) {
+      const selectedSet = new Set(selectedUsers.map(e => e.toLowerCase().trim()));
+      return projects.filter(p => {
+        if (p.userId && selectedSet.has(p.userId.toLowerCase().trim())) return true;
+        return p.users?.some(u => selectedSet.has(u.toLowerCase().trim()));
+      });
+    }
+
+    return projects;
+  }, [projects, isAdmin, currentUserEmail, selectedUsers, allowedUsers]);
+
   // Available locations list based on project locations in sheet
   const availableLocations = useMemo(() => {
     const locSet = new Set<string>();
-    projects.forEach((p) => {
+    userProjects.forEach((p) => {
       const pLoc = (p as any).location;
       if (pLoc && pLoc.trim() !== '') {
         locSet.add(pLoc.trim());
@@ -193,20 +237,19 @@ export default function DSRDashboard({
       locSet.add('Delhi');
     }
     return Array.from(locSet).sort();
-  }, [projects]);
+  }, [userProjects]);
 
   // Available regions list based on project regions in sheet
   const availableRegions = useMemo(() => {
     const regSet = new Set<string>();
-    projects.forEach((p) => {
+    userProjects.forEach((p) => {
       const pReg = (p as any).region;
       if (pReg && pReg.trim() !== '') {
         regSet.add(pReg.trim());
       }
     });
-    
     return Array.from(regSet).sort();
-  }, [projects]);
+  }, [userProjects]);
 
   const regionOptions = useMemo(() => {
     return ['All', ...availableRegions];
@@ -555,13 +598,17 @@ export default function DSRDashboard({
       // 5. User scope checks of Projects
       if (!isAdmin) {
         const assignedUsers = (p as any).users || [];
-        const matchesUser = assignedUsers.some((u: string) => u.toLowerCase().trim() === currentUserEmail.toLowerCase().trim());
+        const emailLower = currentUserEmail.toLowerCase().trim();
+        const matchesUser = (p.userId && String(p.userId).trim().toLowerCase() === emailLower) ||
+                            assignedUsers.some((u: string) => u.toLowerCase().trim() === emailLower);
         if (!matchesUser) {
           return false;
         }
       } else if (selectedUsers.length > 0) {
         const assignedUsers = (p as any).users || [];
-        const matchesUser = assignedUsers.some((u: string) => selectedUsers.includes(u.toLowerCase().trim()));
+        const selectedSet = new Set(selectedUsers.map(e => e.toLowerCase().trim()));
+        const matchesUser = (p.userId && selectedSet.has(String(p.userId).trim().toLowerCase())) ||
+                            assignedUsers.some((u: string) => selectedSet.has(u.toLowerCase().trim()));
         if (!matchesUser) {
           return false;
         }
@@ -976,7 +1023,7 @@ export default function DSRDashboard({
         </div>
 
         {/* Filters Grid */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${isAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 pt-1`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${isAdmin ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4 pt-1`}>
           
           {/* Block 1: Date Filter */}
           <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
@@ -1090,7 +1137,7 @@ export default function DSRDashboard({
                         <span>•</span>
                         <button 
                           type="button" 
-                          onClick={(e) => { e.stopPropagation(); setSelectedProjectIds(projects.map(p => p.id)); }} 
+                          onClick={(e) => { e.stopPropagation(); setSelectedProjectIds(userProjects.map(p => p.id)); }} 
                           className="text-indigo-600 hover:text-indigo-850"
                         >
                           All
@@ -1105,12 +1152,12 @@ export default function DSRDashboard({
                         value={projectSearchTerm}
                         onChange={(e) => setProjectSearchTerm(e.target.value)}
                         placeholder="Search project..."
-                        className="w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 text-gray-950 placeholder-gray-400"
+                        className="w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-indigo-555 text-gray-950 placeholder-gray-400"
                       />
                     </div>
 
                     <div className="space-y-0.5 max-h-36 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                      {projects
+                      {userProjects
                         .filter(p => p.name.toLowerCase().includes(projectSearchTerm.toLowerCase()) || p.code.toLowerCase().includes(projectSearchTerm.toLowerCase()))
                         .map((p) => {
                           const isChecked = selectedProjectIds.includes(p.id);
@@ -1129,7 +1176,102 @@ export default function DSRDashboard({
                                   }}
                                   className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
                                 />
-                                <span className="truncate">{p.name} [{p.code}]</span>
+                                <span className="truncate">{p.name}</span>
+                              </label>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Block 4: Dynamic Location drop down filter based on the particular user's projects */}
+          <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1 leading-none">
+              <MapPin size={11} className="text-gray-400" />
+              Location
+            </span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLocationDropdownOpen(!isLocationDropdownOpen);
+                  setIsProjectDropdownOpen(false);
+                  setIsUserDropdownOpen(false);
+                }}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-950 font-bold focus:outline-none transition hover:bg-gray-50 h-[30px]"
+              >
+                <span className="truncate pr-1">
+                  {selectedLocations.length === 0 
+                    ? 'All Locations' 
+                    : `${selectedLocations.length} selected`}
+                </span>
+                <ChevronDown size={12} className={`text-gray-400 transition-transform shrink-0 ${isLocationDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isLocationDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setIsLocationDropdownOpen(false)} 
+                  />
+                  <div className="absolute right-0 left-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-2.5 space-y-2 max-h-56 overflow-y-auto font-sans">
+                    <div className="flex items-center justify-between text-[9px] pb-1 border-b border-gray-100 font-bold text-gray-400">
+                      <span>LOCATIONS</span>
+                      <div className="flex gap-2">
+                        <button 
+                          type="button" 
+                          onClick={(e) => { e.stopPropagation(); setSelectedLocations([]); }} 
+                          className="text-indigo-600 hover:text-indigo-850"
+                        >
+                          Clear
+                        </button>
+                        <span>•</span>
+                        <button 
+                          type="button" 
+                          onClick={(e) => { e.stopPropagation(); setSelectedLocations(availableLocations); }} 
+                          className="text-indigo-600 hover:text-indigo-850"
+                        >
+                          All
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Small Search Bar */}
+                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={locationSearchTerm}
+                        onChange={(e) => setLocationSearchTerm(e.target.value)}
+                        placeholder="Search location..."
+                        className="w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 text-gray-950 placeholder-gray-400"
+                      />
+                    </div>
+
+                    <div className="space-y-0.5 max-h-36 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                      {availableLocations
+                        .filter(loc => loc.toLowerCase().includes(locationSearchTerm.toLowerCase()))
+                        .map((loc) => {
+                          const isChecked = selectedLocations.includes(loc);
+                          return (
+                            <div key={loc} className="flex items-center justify-between p-1 rounded hover:bg-gray-50 transition-colors">
+                              <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-800 font-bold grow select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    if (isChecked) {
+                                      setSelectedLocations(selectedLocations.filter(item => item !== loc));
+                                    } else {
+                                      setSelectedLocations([...selectedLocations, loc]);
+                                    }
+                                  }}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                                />
+                                <span className="truncate">{loc}</span>
                               </label>
                             </div>
                           );
@@ -1287,7 +1429,7 @@ export default function DSRDashboard({
                     <th className="px-4 py-3">Project Name</th>
                     <th className="px-4 py-3">Domain</th>
                     <th className="px-4 py-3 w-28">Priority</th>
-                    <th className="px-4 py-3 w-28 text-center">Frequency</th>
+                    <th className="px-4 py-3 w-28 text-center">SEO Stats</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
                     {isAdmin && <th className="px-4 py-3">Assigned To</th>}
@@ -1304,9 +1446,6 @@ export default function DSRDashboard({
                           <td className="px-4 py-3 font-mono font-bold text-gray-400">{item.srNo}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono bg-indigo-50 text-indigo-700 font-black text-[9px] px-1.5 py-0.5 rounded">
-                                {item.code}
-                              </span>
                               <span className="font-bold text-gray-900">{item.name}</span>
                             </div>
                           </td>
@@ -1341,10 +1480,10 @@ export default function DSRDashboard({
                             <button
                               type="button"
                               onClick={() => toggleProjectStats(item.id)}
-                              className="inline-flex items-center gap-1.5 bg-indigo-50/50 hover:bg-indigo-100/75 text-indigo-800 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100 transition duration-75 text-[11px] cursor-pointer"
+                              className="inline-flex items-center gap-1.5 bg-indigo-50/50 hover:bg-indigo-100/75 text-indigo-800 font-bold px-2 py-1 rounded border border-indigo-100 transition duration-75 text-[11px] cursor-pointer"
                               title="Click to toggle cumulative backlog stats"
                             >
-                              <span>{item.frequency || 0} / wk</span>
+                              <span>Stats</span>
                               {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                             </button>
                           </td>
@@ -1382,21 +1521,6 @@ export default function DSRDashboard({
                                   <option value="P2">P2</option>
                                   <option value="P3">P3</option>
                                 </select>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="14"
-                                  placeholder="Freq"
-                                  value={item.frequency !== undefined && item.frequency !== null ? item.frequency : ''}
-                                  onChange={(e) => {
-                                    const nextFreq = e.target.value;
-                                    const orig = projects.find(pr => pr.id === item.id);
-                                    if (orig && onUpdateProject) {
-                                      onUpdateProject({ ...orig, frequency: nextFreq });
-                                    }
-                                  }}
-                                  className="w-12 px-1 py-0.5 text-[10px] font-mono text-center font-bold bg-white border border-gray-200 rounded text-gray-800 focus:outline-none"
-                                />
                               </div>
                             </td>
                           )}
@@ -1531,7 +1655,7 @@ export default function DSRDashboard({
                         <td className="px-4 py-3 font-mono font-bold text-gray-400">{item.srNo}</td>
                         <td className="px-4 py-3">
                           <div className="font-bold text-gray-900">
-                            {item.name} <span className="text-[10px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-black ml-1 uppercase">{item.code}</span>
+                            {item.name}
                           </div>
                         </td>
                         <td className="px-4 py-3 font-mono font-bold text-gray-600">
@@ -1548,13 +1672,34 @@ export default function DSRDashboard({
                             <span className="text-gray-350 italic font-normal text-[11px]">No Domain</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          {item.assignedFrequency ? (
-                            <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 text-[10px] uppercase tracking-wider">
-                              {item.assignedFrequency}
-                            </span>
+                        <td className="px-4 py-3 text-center animate-fade-in">
+                          {isAdmin ? (
+                            <div className="flex items-center justify-center gap-1 mx-auto">
+                              <input
+                                type="number"
+                                min="0"
+                                max="14"
+                                placeholder="..."
+                                value={item.assignedFrequency !== undefined && item.assignedFrequency !== null ? item.assignedFrequency : ''}
+                                onChange={(e) => {
+                                  const nextFreq = e.target.value;
+                                  const orig = projects.find(pr => pr.id === item.id);
+                                  if (orig && onUpdateProject) {
+                                    onUpdateProject({ ...orig, frequency: nextFreq });
+                                  }
+                                }}
+                                className="w-14 px-1.5 py-1 text-xs font-mono text-center font-bold bg-white border border-gray-200 rounded-lg text-gray-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 h-[28px]"
+                              />
+                              <span className="text-gray-400 font-bold text-[10px]">/ wk</span>
+                            </div>
                           ) : (
-                            <span className="text-gray-350 italic font-normal text-[11px]">Unassigned</span>
+                            item.assignedFrequency ? (
+                              <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 text-[10px] uppercase tracking-wider">
+                                {item.assignedFrequency}
+                              </span>
+                            ) : (
+                              <span className="text-gray-350 italic font-normal text-[11px]">Unassigned</span>
+                            )
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -2215,7 +2360,6 @@ export default function DSRDashboard({
                             <td className="px-4 py-3.5 font-mono text-gray-400 font-bold">{idx + 1}</td>
                             <td className="px-4 py-3.5">
                               <span className="font-bold text-gray-900 block">{row.name}</span>
-                              <span className="text-[9px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-black mt-1 inline-block uppercase">{row.code}</span>
                             </td>
                             <td className="px-4 py-3.5 font-mono text-gray-500">
                               {row.domain ? (
@@ -2327,9 +2471,6 @@ export default function DSRDashboard({
                         {/* Project Name column */}
                         <td className="px-4 py-3.5 font-bold text-gray-900 text-left">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono bg-rose-50 text-rose-750 font-bold text-[9px] px-1.5 py-0.5 rounded uppercase shrink-0">
-                              {proj.code}
-                            </span>
                             <span className="text-gray-900 font-black">{proj.name}</span>
                           </div>
                         </td>
@@ -2482,9 +2623,6 @@ export default function DSRDashboard({
                         {/* Project Name & Code */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono bg-indigo-50 text-indigo-700 font-black text-[9px] px-1.5 py-0.5 rounded">
-                              {item.code || 'PRJ'}
-                            </span>
                             <span className="font-bold text-gray-900">{item.projName}</span>
                           </div>
                         </td>

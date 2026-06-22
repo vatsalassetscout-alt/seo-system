@@ -41,6 +41,44 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const mapUsersFromProjects = (projectsList: any[]): AppUser[] => {
+  const usersMap = new Map<string, string>();
+  
+  // Parse dynamic mappings from fetched projects
+  projectsList.forEach(p => {
+    if (p.userId && String(p.userId).trim()) {
+      const uId = String(p.userId).trim().toLowerCase();
+      if (p.users && p.users.length > 0) {
+        // Find the first non-ID name in users array
+        const primaryName = p.users.find((u: string) => !/^\d+$/.test(u.trim())) || p.users[0];
+        const formattedName = primaryName
+          .split(' ')
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        usersMap.set(uId, formattedName);
+      }
+    }
+  });
+
+  // Hardcode defaults as backup if any of the specified users are not mapped yet
+  const idsMap = [
+    { id: "1859", name: "Pratap More" }, // Default fallback if no sheet mapping is present yet
+    { id: "9531", name: "User 9531" },
+    { id: "5595", name: "User 5595" },
+    { id: "4001", name: "User 4001" },
+  ];
+  idsMap.forEach(({ id, name }) => {
+    if (!usersMap.has(id)) {
+      usersMap.set(id, name);
+    }
+  });
+
+  return Array.from(usersMap.entries()).map(([userId, name]) => ({
+    email: userId,
+    name: name
+  }));
+};
+
 export default function App() {
   // Global States (synchronized with localStorage)
   const [adminEmails, setAdminEmails] = useState<string[]>(() => {
@@ -55,7 +93,23 @@ export default function App() {
     const saved = localStorage.getItem('dsr_projects');
     const parsed = saved ? JSON.parse(saved) : DEFAULT_PROJECTS;
     if (Array.isArray(parsed)) {
-      return parsed.filter((p: any) => p && p.id !== "titan-realestate" && p.id !== "aerospace-craft" && p.id !== "clean-energy");
+      const filtered = parsed.filter((p: any) => p && p.id !== "titan-realestate" && p.id !== "aerospace-craft" && p.id !== "clean-energy");
+      const map = new Map<string, Project>();
+      filtered.forEach((p: any) => {
+        if (p && p.id) {
+          if (map.has(p.id)) {
+            const existing = map.get(p.id)!;
+            const combinedUsers = Array.from(new Set([
+              ...(existing.users || []),
+              ...(p.users || [])
+            ].map(u => String(u).trim().toLowerCase())));
+            map.set(p.id, { ...existing, ...p, users: combinedUsers });
+          } else {
+            map.set(p.id, p);
+          }
+        }
+      });
+      return Array.from(map.values());
     }
     return [];
   });
@@ -459,6 +513,8 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('dsr_projects', JSON.stringify(projects));
+    const dynamicUsers = mapUsersFromProjects(projects);
+    setAllowedUsers(dynamicUsers);
   }, [projects]);
 
   useEffect(() => {
@@ -501,21 +557,11 @@ export default function App() {
     if (isAdmin) return projects;
 
     const emailLower = currentUserEmail.trim().toLowerCase();
-    const nameLower = getUserDisplayName(currentUserEmail, allowedUsers).toLowerCase();
-    const prefix = emailLower.split('@')[0];
 
     return projects.filter((p) => {
-      if (!p.users || !Array.isArray(p.users) || p.users.length === 0) return false;
-      return p.users.some((user: string) => {
-        const uLower = user.toLowerCase();
-        return uLower === emailLower || 
-               uLower === nameLower || 
-               uLower === prefix || 
-               emailLower.includes(uLower) || 
-               nameLower.includes(uLower);
-      });
+      return p.userId && String(p.userId).trim().toLowerCase() === emailLower;
     });
-  }, [projects, currentUserEmail, isAdmin, allowedUsers]);
+  }, [projects, currentUserEmail, isAdmin]);
   
   // Active Project Assignment tasks for the currently logged in user
   const activeAssignmentAlerts = useMemo(() => {
@@ -529,7 +575,8 @@ export default function App() {
 
       // Check if user has already submitted a work log for this project on this target date
       const isFulfilled = entries.some(entry => {
-        const matchesUser = (entry.userEmail || '').trim().toLowerCase() === lowerCurrent;
+        const entryUserLower = (entry.userEmail || '').trim().toLowerCase();
+        const matchesUser = entryUserLower === lowerCurrent;
         const matchesDate = entry.date === alert.date;
         const hasProject = (entry.works || []).some(w => String(w.projectId) === String(alert.projectId));
         return matchesUser && matchesDate && hasProject;
@@ -556,10 +603,11 @@ export default function App() {
 
     try {
       if (role === 'admin') {
-        const isAdminEmail = adminEmails.some((a) => a.trim().toLowerCase() === emailLower) ||
+        const isAdminEmail = emailLower === '8888' ||
+                             adminEmails.some((a) => a.trim().toLowerCase() === emailLower) ||
                              ADMIN_EMAILS.some((a) => a.trim().toLowerCase() === emailLower);
         if (!isAdminEmail) {
-          throw new Error(`Access Denied: The email "${emailLower}" is not registered as an Administrator.`);
+          throw new Error(`Access Denied: The ID/Email "${emailLower}" is not registered as an Administrator.`);
         }
 
         registerLoggedInUser(emailLower);
@@ -568,9 +616,11 @@ export default function App() {
         localStorage.setItem('dsr_logged_role', 'admin');
         setActiveTab('dashboard');
       } else {
-        const isAllowedUser = allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower);
+        const validIds = ["1859", "9531", "5595", "4001"];
+        const isAllowedUser = validIds.includes(emailLower) || 
+                             allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower);
         if (!isAllowedUser) {
-          throw new Error(`Access Denied: The email "${emailLower}" is not authorized. Please contact your workspace administrator.`);
+          throw new Error(`Access Denied: The ID/Email "${emailLower}" is not authorized.`);
         }
 
         const nowStr = new Date().toLocaleString('en-US', {
@@ -582,21 +632,20 @@ export default function App() {
           hour12: true
         });
 
-        setAllowedUsers(prev => prev.map(u => 
-          u.email.trim().toLowerCase() === emailLower 
-            ? { ...u, lastLoggedIn: nowStr }
-            : u
-        ));
+        setAllowedUsers(prev => {
+          const exists = prev.some(u => u.email.trim().toLowerCase() === emailLower);
+          if (exists) {
+            return prev.map(u => 
+              u.email.trim().toLowerCase() === emailLower 
+                ? { ...u, lastLoggedIn: nowStr }
+                : u
+            );
+          } else {
+            return [...prev, { email: emailLower, name: `User ${emailLower}`, lastLoggedIn: nowStr }];
+          }
+        });
 
         registerLoggedInUser(emailLower);
-
-        // Fetch name and details safely even if not in the main allowed list yet
-        const updatedAllowedUsers = [...allowedUsers];
-        const matched = updatedAllowedUsers.find((u) => u.email.trim().toLowerCase() === emailLower) || {
-          email: emailLower,
-          name: emailLower.includes('@') ? emailLower.split('@')[0].charAt(0).toUpperCase() + emailLower.split('@')[0].slice(1) : emailLower
-        };
-        const resolvedName = matched.name;
 
         setCurrentUserEmail(emailLower);
         setCurrentUserRole('user');

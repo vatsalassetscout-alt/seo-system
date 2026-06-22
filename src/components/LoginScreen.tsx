@@ -11,6 +11,9 @@ interface LoginScreenProps {
   onLogin: (userId: string, role: 'user' | 'admin') => void;
   isLoggingIn?: boolean;
   loginError?: string | null;
+  adminEmails?: string[];
+  allowedUsers?: any[];
+  onGoogleSignIn?: () => Promise<void>;
 }
 
 // Credentials mapping specified by user
@@ -100,7 +103,7 @@ export default function LoginScreen({
                 type="text"
                 required
                 autoFocus
-                placeholder="e.g. 1859"
+                placeholder="Your ID"
                 value={idInput}
                 onChange={(e) => {
                   setIdInput(e.target.value);

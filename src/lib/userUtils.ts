@@ -7,15 +7,18 @@ export const getUserDisplayName = (email: string | null | undefined, allowedUser
   if (!email) return '';
   const val = email.trim();
 
-  // Find in allowedUsers
+  // Find in allowedUsers and prefer non-generic placeholder name
   const matched = allowedUsers.find((u) => u.email.trim().toLowerCase() === val.toLowerCase());
-  if (matched && matched.name && matched.name.trim()) {
+  if (matched && matched.name && matched.name.trim() && !/^User\s+\d+$/i.test(matched.name.trim())) {
     return matched.name;
   }
 
   // Check if purely numeric
   if (/^\d+$/.test(val)) {
-    if (val === '8888') return 'Admin 8888';
+    if (val === '8888') return 'Admin';
+    if (matched && matched.name && matched.name.trim()) {
+      return matched.name;
+    }
     return `User ${val}`;
   }
 

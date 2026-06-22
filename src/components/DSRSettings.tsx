@@ -100,7 +100,7 @@ export default function DSRSettings({
   onAddAlert = () => {},
 }: DSRSettingsProps) {
   // Navigation Tabs inside Settings Panel
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'admins' | 'assignments' | 'sheets'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'assignments' | 'sheets'>('users');
 
   // Input states
   const [newAdminEmail, setNewAdminEmail] = useState('');
@@ -265,17 +265,6 @@ export default function DSRSettings({
           <Users size={15} />
           Users
         </button>
-        <button
-          onClick={() => setActiveSubTab('admins')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeSubTab === 'admins'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <Mail size={15} />
-          Authorized Administrators
-        </button>
 
         <button
           onClick={() => setActiveSubTab('assignments')}
@@ -298,7 +287,7 @@ export default function DSRSettings({
           }`}
         >
           <FileSpreadsheet size={15} />
-          Google Sheets Integration
+          Google Sheets Config
         </button>
       </div>
 
@@ -329,79 +318,23 @@ export default function DSRSettings({
               <div className="border-b border-gray-100 pb-4">
                 <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
                   <Users size={16} className="text-indigo-600 animate-pulse" />
-                  Employee Directory & Authorized Emails
+                  Employee Directory & User IDs
                 </h4>
                 <p className="text-xs text-gray-400">
-                  Assign human names to corporate emails. Authorized employees will gain Work Log access. All reports in the system will display these names.
+                  Assign human names to User IDs. Authorized employees will gain Work Log access. All reports in the system will display these names.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="space-y-4">
                 
-                {/* Form: Add / Edit User */}
-                <div className="bg-gray-50 p-6 rounded-2xl border border-gray-150 h-fit">
-                  <h5 className="font-bold text-gray-800 text-xs mb-4 flex items-center gap-1.5 uppercase tracking-wide">
-                    <UserPlus size={14} className="text-slate-500" />
-                    Authorize New User
-                  </h5>
-                  <form onSubmit={(e) => {
-                    e.preventDefault();
-                    const email = newUserEmail.trim().toLowerCase();
-                    const name = newUserName.trim();
-                    if (!email || !name) return;
-
-                    const exists = allowedUsers.some(u => u.email.toLowerCase() === email);
-                    if (exists) {
-                      onSetAllowedUsers(prev => prev.map(u => u.email.toLowerCase() === email ? { ...u, name } : u));
-                      triggerAlert('success', `Updated human name for ${email} to "${name}".`);
-                    } else {
-                      onSetAllowedUsers(prev => [...prev, { email, name }]);
-                      triggerAlert('success', `Successfully authorized employee "${name}" (${email}).`);
-                    }
-                    setNewUserEmail('');
-                    setNewUserName('');
-                  }} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Full Name</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Alex Rivera"
-                        value={newUserName}
-                        onChange={(e) => setNewUserName(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 font-semibold"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">Email Address</label>
-                      <input
-                        type="email"
-                        required
-                        placeholder="e.g. employee@company.com"
-                        value={newUserEmail}
-                        onChange={(e) => setNewUserEmail(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-semibold"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                    >
-                      Save & Authorize User
-                    </button>
-                  </form>
-                </div>
-
                 {/* Table: Registered Users */}
-                <div className="lg:col-span-2 space-y-4">
+                <div className="space-y-4">
                   <div className="flex flex-col gap-1">
                     {(() => {
                       const isUserAdmin = (email: string): boolean => {
                         if (!email) return false;
                         const emailLower = email.trim().toLowerCase();
-                        if (emailLower.includes("admin")) return true;
+                        if (emailLower === '8888' || emailLower.includes("admin")) return true;
                         if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
                         const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
                         if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
@@ -424,7 +357,7 @@ export default function DSRSettings({
                       <thead>
                         <tr className="border-b border-gray-150 bg-gray-50/70 text-[9px] font-bold text-gray-400 uppercase tracking-widest">
                           <th className="py-3 px-4 text-left">Employee Name</th>
-                          <th className="py-3 px-4 text-left">Authorized Email</th>
+                          <th className="py-3 px-4 text-left">User ID</th>
                           <th className="py-3 px-4 text-center">Last Logged In</th>
                           <th className="py-3 px-4 text-center">Action</th>
                         </tr>
@@ -434,7 +367,7 @@ export default function DSRSettings({
                           const isUserAdmin = (email: string): boolean => {
                             if (!email) return false;
                             const emailLower = email.trim().toLowerCase();
-                            if (emailLower.includes("admin")) return true;
+                            if (emailLower === '8888' || emailLower.includes("admin")) return true;
                             if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
                             const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
                             if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
@@ -489,79 +422,7 @@ export default function DSRSettings({
           </div>
         )}
 
-        {/* TAB 4: Authorized Administrators */}
-        {activeSubTab === 'admins' && (
-          <div className="space-y-8 animate-fade-in">
-            <div className="border-b border-gray-100 pb-5">
-              <h4 className="font-extrabold text-gray-900 text-sm">Privileged Admin Emails</h4>
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              
-              {/* Left Column: Authorized Admins List */}
-              <div className="space-y-3">
-                <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Admin Emails Directory</span>
-                <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto pr-1">
-                  {adminEmails.map((email) => (
-                    <div key={email} className="py-3 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-gray-800 font-mono">{email}</span>
-                        {email === currentUserEmail && (
-                          <span className="text-[8px] font-sans font-bold bg-indigo-100 text-indigo-750 px-1.5 py-0.5 rounded-full uppercase">
-                            Your account
-                          </span>
-                        )}
-                      </div>
-                      {email !== currentUserEmail && adminEmails.length > 1 && (
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Revoke administrator permissions for email: ${email}?`)) {
-                              onDeleteAdminEmail(email);
-                            }
-                          }}
-                          className="p-1 hover:bg-rose-50 text-gray-400 hover:text-rose-500 rounded cursor-pointer transition"
-                          title="Revoke Admin Access privileges"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Right Column: Invite Form */}
-              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-150 flex flex-col justify-between">
-                <form onSubmit={handleAddAdminEmail} className="space-y-4">
-                  <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Register Authorized Admin</span>
-                  
-                  <div className="space-y-1.5">
-                    <label htmlFor="admin-sub-email" className="text-[10px] text-gray-500 font-bold block uppercase">Email Address</label>
-                    <input
-                      id="admin-sub-email"
-                      type="email"
-                      required
-                      placeholder="account@company.com"
-                      value={newAdminEmail}
-                      onChange={(e) => setNewAdminEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 font-mono font-semibold"
-                    />
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
-                    >
-                      <Plus size={13} /> Elevate Email to Admin
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-            </div>
-          </div>
-        )}
 
 
 
@@ -763,193 +624,173 @@ export default function DSRSettings({
           </div>
         )}
 
-        {/* TAB 4: Google Sheets Integration */}
+        {/* TAB 3: Google Sheets Database Integration */}
         {activeSubTab === 'sheets' && (
           <div className="space-y-8 animate-fade-in text-left">
-            <div>
-              <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2 border-b border-gray-100 pb-3">
-                <FileSpreadsheet className="text-emerald-600" size={16} />
-                Google Sheets Integration Setup
+            <div className="border-b border-gray-100 pb-4">
+              <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
+                <FileSpreadsheet size={16} className="text-indigo-600" />
+                Google Sheets Database Integration
               </h4>
-              <p className="text-gray-500 text-xs mt-2 leading-relaxed font-semibold">
-                Configure your spreadsheet IDs and sheets tab names dynamically to load your master projects list and synchronize your daily submissions back to Google Sheets.
+              <p className="text-xs text-gray-450">
+                Synchronise this application's master projects list, submissions, alerts/notes, and activity audit logs directly with your Google Sheets spreadsheet!
               </p>
             </div>
 
-            {/* Instruction Card */}
-            <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-2xl space-y-3">
-              <div className="flex items-start gap-3">
-                <span className="text-base text-emerald-700 font-bold">📢</span>
-                <div className="space-y-1">
-                  <h5 className="font-extrabold text-emerald-950 text-xs uppercase tracking-wider">CRITICAL PRE-REQUISITE: GRANT COMPANION ACCESS</h5>
-                  <p className="text-[11px] text-emerald-850 leading-relaxed font-medium">
-                    Your Google Sheets must be shared with the centralized system service account. If they are not shared, Google API will block connection efforts with a <code className="bg-emerald-100/60 px-1 py-0.5 rounded font-mono font-bold text-emerald-950">403/404 Error</code>.
-                  </p>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* Credentials Card */}
+              <div className="md:col-span-1 bg-slate-50/50 p-6 rounded-2xl border border-gray-150 h-fit space-y-4">
+                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
+                  🔑 Service Account
+                </h5>
+                
+                <div className="space-y-3 text-xs">
+                  <div className="p-3 bg-white border border-gray-200 rounded-xl space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-gray-400">Server Authentication</span>
+                    <div className="flex items-center gap-1.5 font-bold">
+                      {serviceAccountConfigured ? (
+                        <span className="text-emerald-600 flex items-center gap-1">🟢 Connected</span>
+                      ) : (
+                        <span className="text-amber-600 flex items-center gap-1">⚠️ Local Fallback (No Server Credentials)</span>
+                      )}
+                    </div>
+                  </div>
 
-              <div className="mt-2 bg-white/85 p-3 rounded-xl border border-emerald-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Service Account Email to Invite:</span>
-                  <div className="text-xs font-mono font-black text-slate-800 break-all select-all">
-                    {serviceAccountEmail || "Loading Google account identity..."}
+                  {serviceAccountEmail && (
+                    <div className="p-3 bg-white border border-gray-200 rounded-xl space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Service Account Email</span>
+                      <span className="font-mono text-[9px] text-gray-750 block break-all font-bold select-all bg-gray-50 p-1.5 rounded">{serviceAccountEmail}</span>
+                      <button
+                        onClick={handleCopyEmail}
+                        className="mt-2 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                      >
+                        {isCopied ? <span className="text-emerald-600 font-bold">Copied!</span> : <>Copy Address</>}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="p-4 bg-amber-50/40 border border-amber-100 rounded-xl space-y-2 text-amber-900 leading-relaxed">
+                    <h6 className="font-bold text-[10px]">💡 SETUP INSTRUCTIONS:</h6>
+                    <ol className="list-decimal list-inside space-y-1 text-[9px] text-amber-950 font-medium">
+                      <li>Copy the Service Account Email address above.</li>
+                      <li>Go to your Google Spreadsheet and click <strong>Share</strong>.</li>
+                      <li>Add the copied address as an <strong>Editor</strong> and click Share.</li>
+                      <li>Save Spreadsheet IDs and tab names on the right side.</li>
+                    </ol>
                   </div>
                 </div>
-                {serviceAccountEmail && (
-                  <button
-                    type="button"
-                    onClick={handleCopyEmail}
-                    className="shrink-0 flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
-                  >
-                    {isCopied ? (
-                      <>
-                        <Check size={12} />
-                        Copied!
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={12} />
-                        Copy Email
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
 
-              <div className="text-[10px] text-emerald-800 font-semibold leading-relaxed">
-                💡 <span className="font-bold">Instructions:</span> Open your Google Sheets, click the <span className="font-bold">"Share"</span> button, paste this service account email, and select <span className="font-bold">Editor</span> (this is required so the system can write submissions and logs).
+              {/* Form Config spreadsheet IDs */}
+              <div className="md:col-span-2 space-y-6">
+                <form onSubmit={handleSaveSheetSettings} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
+                        Projects Spreadsheet ID / URL
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Google Spreadsheet ID or URL"
+                        value={projectsSpreadsheetId}
+                        onChange={(e) => setProjectsSpreadsheetId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
+                        Logs & Activities Spreadsheet ID / URL
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Google Spreadsheet ID or URL"
+                        value={logsSpreadsheetId}
+                        onChange={(e) => setLogsSpreadsheetId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
+                        Projects Tab Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Projects_Mapping"
+                        value={projectsTab}
+                        onChange={(e) => setProjectsTab(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
+                        DSR Logs Tab Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="DSR_Logs"
+                        value={submissionsTab}
+                        onChange={(e) => setSubmissionsTab(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
+                        Locations Tab Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Locations"
+                        value={locationsTab}
+                        onChange={(e) => setLocationsTab(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="submit"
+                      disabled={sheetsTesting || isSyncing}
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                    >
+                      {sheetsTesting || isSyncing ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          Testing Connection & Syncing...
+                        </>
+                      ) : (
+                        <>
+                          Save & Synchronise
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Submissions stats details summary */}
+                <div className="p-4 bg-indigo-50/30 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-2">
+                  <h6 className="font-bold flex items-center gap-1 text-slate-800">
+                    ℹ️ Integration Matrix:
+                  </h6>
+                  <ul className="list-disc list-inside space-y-1 text-gray-650 text-[11px] leading-relaxed">
+                    <li><strong>Bi-directional Projects Sync:</strong> Changes in mapping sheets populate immediately inside system; additions push right back.</li>
+                    <li><strong>Real-time Work Logs Appending:</strong> Work status and counts write live to Google Sheets under <code>DSR_Logs</code>.</li>
+                    <li><strong>System Activity Trail:</strong> User logins, notes, project creations and setting adjustments logged automatically in Google Sheets under <code>Activity_Logs</code> worksheet.</li>
+                    <li><strong>Notes & Alerts Persistence:</strong> Stick-notes, reminders, and user assignments are securely read/write synced with Google Sheets under <code>System_Alerts</code>.</li>
+                  </ul>
+                </div>
               </div>
             </div>
-
-            {/* Connection Form */}
-            <form onSubmit={handleSaveSheetSettings} className="space-y-6">
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                
-                {/* 1) Projects Spreadsheet ID */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-gray-500 font-bold block uppercase tracking-wide">
-                    Projects Spreadsheet ID
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 1a2b3c4d5e6f7G8H9I0J-kLmNoPqRsTuVwXyZ"
-                    value={projectsSpreadsheetId}
-                    onChange={(e) => setProjectsSpreadsheetId(e.target.value.trim())}
-                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
-                  />
-                  <span className="text-[10px] text-gray-500 font-medium block leading-normal">
-                    The Spreadsheet containing your projects list. (Extract from URL: <span className="font-mono bg-slate-50 px-1 py-0.5 rounded text-gray-650 break-all">/spreadsheets/d/<b>[THIS_PART]</b>/edit</span>)
-                  </span>
-                </div>
-
-                {/* 2) Logs Spreadsheet ID */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-gray-500 font-bold block uppercase tracking-wide">
-                    Logs/Submissions Spreadsheet ID
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 1a2b3c4d5e6f7G8H9I0J-kLmNoPqRsTuVwXyZ"
-                    value={logsSpreadsheetId}
-                    onChange={(e) => setLogsSpreadsheetId(e.target.value.trim())}
-                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
-                  />
-                  <span className="text-[10px] text-gray-500 font-medium block leading-normal">
-                    Can be identical to the Projects Spreadsheet ID if using different tabs within the same sheet.
-                  </span>
-                </div>
-
-              </div>
-
-              {/* Sheet/Tab configs */}
-              <div className="border-t border-gray-100 pt-5 space-y-4">
-                <h5 className="font-extrabold text-gray-800 text-[11px] uppercase tracking-wider">
-                  Spreadsheet Tab/Sheet Names
-                </h5>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* Tab 1: Projects Tab */}
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
-                      Projects Sheet Tab
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Projects_Mapping"
-                      value={projectsTab}
-                      onChange={(e) => setProjectsTab(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Tab 2: Daily Logs Tab */}
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
-                      Daily Logs Sheet Tab
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. DSR_Logs"
-                      value={submissionsTab}
-                      onChange={(e) => setSubmissionsTab(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Tab 3: Locations Tab */}
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] text-gray-500 font-bold block uppercase tracking-wider">
-                      Locations Sheet Tab
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Locations"
-                      value={locationsTab}
-                      onChange={(e) => setLocationsTab(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 font-mono font-semibold focus:outline-none"
-                    />
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Status & Submit */}
-              <div className="border-t border-gray-100 pt-5 flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full ${sheetSettings?.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
-                  <span className="text-xs font-bold text-gray-700">
-                    Connection Status: {sheetSettings?.isConnected ? 'Active & Linked' : 'Disconnected / Not Configured'}
-                  </span>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={sheetsTesting || !projectsSpreadsheetId || !logsSpreadsheetId}
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-xs font-sans uppercase"
-                >
-                  {sheetsTesting ? (
-                    <>
-                      <RefreshCw className="animate-spin" size={13} />
-                      Saving & Synchronising Google Sheets...
-                    </>
-                  ) : (
-                    <>
-                      <FileSpreadsheet size={13} />
-                      Save & Synchronise Spreadsheet
-                    </>
-                  )}
-                </button>
-              </div>
-
-            </form>
           </div>
         )}
+
+
 
       </div>
     </div>

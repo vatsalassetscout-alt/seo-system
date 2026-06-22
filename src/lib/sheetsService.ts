@@ -61,7 +61,8 @@ export async function fetchProjectsFromSheet(
       name: normalizedHeaders.findIndex(h => h.includes('project') || h.includes('name') || h === 'title'),
       location: normalizedHeaders.findIndex(h => h.includes('location') || h.includes('city') || h.includes('office')),
       region: normalizedHeaders.findIndex(h => h.includes('region') || h.includes('zone') || h === 'area'),
-      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee'))
+      users: normalizedHeaders.findIndex(h => h.includes('users') || h.includes('assign') || h.includes('member') || h.includes('staff') || h.includes('employee')),
+      userId: normalizedHeaders.findIndex(h => h.includes('user id') || h.includes('userid') || h.includes('employee id') || h.includes('staff id') || h === 'uid' || h === 'id')
     };
 
     // Find up to 8 keyword columns
@@ -89,6 +90,7 @@ export async function fetchProjectsFromSheet(
       const location = getVal(colIdx.location, "Mumbai");
       const region = getVal(colIdx.region, "West");
       const usersStr = getVal(colIdx.users);
+      const userId = getVal(colIdx.userId);
       const description = "";
 
       const usersList = usersStr 
@@ -111,6 +113,7 @@ export async function fetchProjectsFromSheet(
         location,
         region,
         users: usersList,
+        userId,
         description,
         priority: "",
         frequency: "",
@@ -118,7 +121,35 @@ export async function fetchProjectsFromSheet(
       };
     }).filter((p: Project) => p.name);
 
-    return mappedProjects;
+    // Deduplicate and merge projects by id
+    const deduplicatedMap = new Map<string, Project>();
+    mappedProjects.forEach((p) => {
+      if (deduplicatedMap.has(p.id)) {
+        const existing = deduplicatedMap.get(p.id)!;
+        const combinedUsers = Array.from(new Set([
+          ...(existing.users || []),
+          ...(p.users || [])
+        ].map(u => String(u).trim().toLowerCase())));
+        const combinedKeywords = Array.from(new Set([
+          ...(existing.keywords || []),
+          ...(p.keywords || [])
+        ].map(k => String(k).trim())));
+
+        deduplicatedMap.set(p.id, {
+          ...existing,
+          ...p,
+          users: combinedUsers,
+          keywords: combinedKeywords.slice(0, 8),
+          location: existing.location !== "Mumbai" ? existing.location : p.location,
+          region: existing.region !== "West" ? existing.region : p.region,
+          userId: existing.userId || p.userId
+        });
+      } else {
+        deduplicatedMap.set(p.id, p);
+      }
+    });
+
+    return Array.from(deduplicatedMap.values());
   } catch (error) {
     console.error('Error fetching projects from Sheet:', error);
     throw error;

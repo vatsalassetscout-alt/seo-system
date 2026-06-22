@@ -8,6 +8,7 @@ export interface Project {
   location?: string;
   region?: string;
   users?: string[];
+  userId?: string;
   priority?: string; // e.g. "P1", "P2", "P3"
   keywords?: string[]; // Array of strings (up to 8 keywords per project)
 }

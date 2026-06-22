@@ -23,7 +23,10 @@ import {
   ChevronUp,
   X,
   User,
-  Users
+  Users,
+  Activity,
+  RefreshCw,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -65,17 +68,65 @@ export default function DSRLogs({
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('');
 
+  // Sytem activity audit log state triggers
+  const [activeLogTab, setActiveLogTab] = useState<'submissions' | 'activities'>('submissions');
+  const [activitiesList, setActivitiesList] = useState<any[]>([]);
+  const [isLoadingActivities, setIsLoadingActivities] = useState(false);
+  const [activitySearchTerm, setActivitySearchTerm] = useState('');
+
+  const handleFetchActivities = () => {
+    setIsLoadingActivities(true);
+    fetch('/api/activity')
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Failed to load system activity logs');
+      })
+      .then(data => {
+        if (Array.isArray(data)) {
+          setActivitiesList(data);
+        }
+      })
+      .catch(err => console.error("Error loading activities:", err))
+      .finally(() => setIsLoadingActivities(false));
+  };
+
+  useEffect(() => {
+    if (activeLogTab === 'activities') {
+      handleFetchActivities();
+    }
+  }, [activeLogTab]);
+
+  const filteredActivities = useMemo(() => {
+    if (!activitySearchTerm.trim()) return activitiesList;
+    const term = activitySearchTerm.toLowerCase();
+    return activitiesList.filter(act => {
+      const email = (act.userEmail || '').toLowerCase();
+      const type = (act.eventType || '').toLowerCase();
+      const desc = (act.details || '').toLowerCase();
+      return email.includes(term) || type.includes(term) || desc.includes(term);
+    });
+  }, [activitiesList, activitySearchTerm]);
+
   // Host list of all users on the system (both allowed list and historic logging addresses)
   const allUsersList = useMemo(() => {
     const emailMap = new Map<string, string>();
+    const isUserAdmin = (email: string): boolean => {
+      if (!email) return false;
+      const emailLower = email.trim().toLowerCase();
+      if (emailLower === '8888' || emailLower.includes('admin')) return true;
+      const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
+      if (hardcodedAdmins.some((a) => a.toLowerCase() === emailLower)) return true;
+      return false;
+    };
+
     allowedUsers.forEach(u => {
-      if (u.email && u.email.trim()) {
-        emailMap.set(u.email.trim().toLowerCase(), u.name || u.email);
+      if (u.email && u.email.trim() && !isUserAdmin(u.email)) {
+        emailMap.set(u.email.trim().toLowerCase(), u.name || getUserDisplayName(u.email, allowedUsers));
       }
     });
 
     entries.forEach(entry => {
-      if (entry && entry.userEmail) {
+      if (entry && entry.userEmail && !isUserAdmin(entry.userEmail)) {
         const email = entry.userEmail.trim().toLowerCase();
         if (!emailMap.has(email)) {
           emailMap.set(email, getUserDisplayName(email, allowedUsers));
@@ -102,7 +153,7 @@ export default function DSRLogs({
 
     // Overwrite with assigned name from allowedUsers
     allowedUsers.forEach(u => {
-      map[u.email.trim().toLowerCase()] = u.name;
+      map[u.email.trim().toLowerCase()] = u.name || getUserDisplayName(u.email, allowedUsers);
     });
 
     return map;
@@ -311,8 +362,37 @@ export default function DSRLogs({
 
   return (
     <div className="space-y-6">
-      {/* Search & Parameters panel */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs space-y-4">
+      {/* Tab Switcher for DSR logs vs System Activity Logs */}
+      <div className="flex border-b border-gray-150 gap-2 overflow-x-auto pb-px">
+        <button
+          onClick={() => setActiveLogTab('submissions')}
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
+            activeLogTab === 'submissions'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
+          }`}
+        >
+          <Layers size={14} />
+          Daily Task Submissions
+        </button>
+
+        <button
+          onClick={() => setActiveLogTab('activities')}
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
+            activeLogTab === 'activities'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
+          }`}
+        >
+          <Activity size={14} />
+          System Activities & Audits
+        </button>
+      </div>
+
+      {activeLogTab === 'submissions' ? (
+        <>
+          {/* Search & Parameters panel */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h3 className="text-base font-bold text-gray-900">Historical Daily Logs</h3>
@@ -349,7 +429,7 @@ export default function DSRLogs({
               <option value="all">Every Project (All Allocations)</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} [{p.code}]
+                  {p.name}
                 </option>
               ))}
             </select>
@@ -705,10 +785,7 @@ export default function DSRLogs({
                                       >
                                         {/* Left Side: Project details */}
                                         <div className="flex items-center gap-2 min-w-[180px] shrink-0">
-                                          <span className="font-mono bg-indigo-650 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase">
-                                            {matchedProj?.code || 'DEV'}
-                                          </span>
-                                          <span className="text-xs font-bold text-gray-900 truncate max-w-[140px]" title={matchedProj?.name || work.projectName}>
+                                          <span className="text-xs font-black text-indigo-750 max-w-[220px] truncate" title={matchedProj?.name || work.projectName}>
                                             {matchedProj?.name || work.projectName || 'Task Item'}
                                           </span>
                                         </div>
@@ -802,6 +879,111 @@ export default function DSRLogs({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      </>
+      ) : (
+        <div className="space-y-6">
+          {/* Activity Parameter Search Panel */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-150/65 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex-1 max-w-sm relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+              <input
+                type="text"
+                placeholder="Search activity records (email, action, details)..."
+                value={activitySearchTerm}
+                onChange={(e) => setActivitySearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-955 focus:outline-none focus:ring-1 focus:ring-indigo-550 transition h-[40px]"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleFetchActivities}
+                disabled={isLoadingActivities}
+                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw size={12} className={isLoadingActivities ? "animate-spin" : ""} />
+                Force Sync & Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-gray-150/60 shadow-xs overflow-hidden p-6 sm:p-8">
+            <div className="border-b border-gray-100 pb-4 mb-6 flex flex-col sm:flex-row justify-between sm:items-center gap-2 text-left">
+              <div>
+                <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
+                  <ShieldCheck className="text-indigo-600 font-bold" size={16} />
+                  Security Activity Log & Audit Trail
+                </h4>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Live audit trail showing user logins, notes, assignments, and sheet modifications synchronised directly with your Google Sheets database.
+                </p>
+              </div>
+              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2.5 py-1 rounded-full border border-slate-200/50">
+                {filteredActivities.length} logs cached
+              </span>
+            </div>
+
+            {isLoadingActivities && activitiesList.length === 0 ? (
+              <div className="py-16 text-center space-y-3">
+                <RefreshCw size={24} className="animate-spin text-indigo-500 mx-auto" />
+                <span className="text-xs text-gray-400 font-bold block">Synchronising live logs from your Google Spreadsheet...</span>
+              </div>
+            ) : filteredActivities.length === 0 ? (
+              <div className="py-16 text-center text-gray-400 italic text-xs">
+                No system activity log matching search criteria found. Log in or create a status note to start.
+              </div>
+            ) : (
+              <div className="relative pl-6 border-l border-indigo-100 space-y-8 select-none">
+                {(() => {
+                  return filteredActivities.map((act) => {
+                    const eventType = act.eventType || '';
+                    let badgeClass = 'bg-gray-105 text-gray-800';
+                    if (eventType.includes('Login') || eventType.toLowerCase().includes('login')) badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-100';
+                    else if (eventType.includes('CREATE') || eventType === 'DSR Submission' || eventType.toLowerCase().includes('submission')) badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-100';
+                    else if (eventType.includes('EDIT')) badgeClass = 'bg-amber-50 text-amber-700 border border-amber-100';
+                    else if (eventType.includes('DELETE')) badgeClass = 'bg-rose-50 text-rose-700 border border-rose-105';
+                    else if (eventType.includes('Note') || eventType.includes('Alert')) badgeClass = 'bg-purple-50 text-purple-700 border border-purple-100';
+
+                    const humanName = employeeNamesMap[act.userEmail?.toLowerCase()] || act.userEmail;
+
+                    return (
+                      <div key={act.id} className="relative group text-left">
+                        {/* Bullet element */}
+                        <div className="absolute -left-[31px] top-1 bg-white border-2 border-indigo-550 rounded-full w-[11px] h-[11px] group-hover:scale-130 transition-transform duration-150" />
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <span className="font-extrabold text-[12px] text-gray-900">{humanName}</span>
+                            <span className="text-[10px] text-gray-400 font-mono">({act.userEmail})</span>
+                            <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-0.5 rounded-full ${badgeClass}`}>
+                              {eventType}
+                            </span>
+                          </div>
+                          
+                          <span className="text-[10px] font-medium text-gray-400 font-mono shrink-0">
+                            {new Date(act.timestamp).toLocaleString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            })}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-gray-600 mt-1 font-semibold pl-0.5 leading-relaxed">
+                          {act.details}
+                        </p>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
           </div>
         </div>
       )}
