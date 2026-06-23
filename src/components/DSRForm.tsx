@@ -74,6 +74,29 @@ export default function DSRForm({
 
   const [isSuccess, setIsSuccess] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [dropdownSearch, setDropdownSearch] = useState('');
+
+  const handleToggleContentUpdate = (index: number, type: string) => {
+    setValidationError(null);
+    const work = worksList[index];
+    const current = work.contentUpdates || [];
+    
+    if (type === 'restructure') {
+      const isSelected = current.includes('restructure');
+      handleUpdateWorkBlock(index, { contentUpdates: isSelected ? [] : ['restructure'] });
+    } else {
+      const isSelected = current.includes(type);
+      if (isSelected) {
+        const next = current.filter((o: string) => o !== type && o !== 'restructure');
+        handleUpdateWorkBlock(index, { contentUpdates: next });
+      } else {
+        const currentOthers = current.filter((o: string) => o !== 'restructure');
+        const next = [...currentOthers, type];
+        handleUpdateWorkBlock(index, { contentUpdates: next });
+      }
+    }
+  };
 
   useEffect(() => {
     if (projects && projects.length > 0) {
@@ -217,6 +240,14 @@ export default function DSRForm({
       return;
     }
 
+    if (hasSEO && (
+      listingCount < 0 || blogCount < 0 || forumCount < 0 || pdfCount < 0 ||
+      imageCount < 0 || videoPptCount < 0 || profileCount < 0 || linkCount < 0
+    )) {
+      setValidationError('Negative numbers are strictly not allowed for count inputs under SEO Backlink Submission.');
+      return;
+    }
+
     if (hasContentUpdate && (!work.contentUpdates || work.contentUpdates.length === 0)) {
       setValidationError('Please select at least one content update option (check box).');
       return;
@@ -230,6 +261,10 @@ export default function DSRForm({
         const parsed = parseVal(rawVal);
         if (isNaN(parsed)) {
           setValidationError(`Please enter a valid number for "${cType.name}".`);
+          return;
+        }
+        if (parsed < 0) {
+          setValidationError(`Negative values are not allowed for "${cType.name}".`);
           return;
         }
         cleanCustomValues[cType.id] = parsed;
@@ -367,25 +402,154 @@ export default function DSRForm({
 
                   {/* Body Form inputs */}
                   <div className="p-6 sm:p-8 space-y-6">
-                    
-                    {/* Select Project block - full width at top */}
-                    <div className="space-y-2">
-                      <label htmlFor={`proj-select-${idx}`} className="block text-xs font-bold text-indigo-750 uppercase tracking-wider flex items-center gap-2">
-                        <Layers size={14} className="text-indigo-600" />
-                        Domain
-                      </label>
-                      <select
-                        id={`proj-select-${idx}`}
-                        value={work.projectId}
-                        onChange={(e) => handleUpdateWorkBlock(idx, { projectId: e.target.value })}
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-950 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-600 transition text-sm cursor-pointer"
-                      >
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.domain || p.name}
-                          </option>
-                        ))}
-                      </select>
+                                       {/* Select Project block with brand-new searchable dropdown & keyword selector */}
+                    <div className="space-y-4">
+                      {/* Select Project block - full width at top */}
+                      <div className="space-y-2">
+                        <label className="block text-xs font-bold text-indigo-750 uppercase tracking-wider flex items-center gap-2">
+                          <Layers size={14} className="text-indigo-600" />
+                          Domain
+                        </label>
+                        
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsDropdownOpen(!isDropdownOpen);
+                              setDropdownSearch('');
+                            }}
+                            className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-gray-955 font-bold flex items-center justify-between text-sm cursor-pointer transition focus:ring-2 focus:ring-indigo-600 focus:outline-none animate-pulse-once"
+                          >
+                            <span className="truncate">
+                              {projects.find((p) => p.id === work.projectId)?.domain || 
+                               projects.find((p) => p.id === work.projectId)?.name || 
+                               'Select a Domain'}
+                            </span>
+                            <span className="text-gray-400 shrink-0 select-none text-[10px] ml-2">▼</span>
+                          </button>
+
+                          {isDropdownOpen && (
+                            <>
+                              {/* Backdrop overlay for closing if clicked outside */}
+                              <div 
+                                className="fixed inset-0 z-45 bg-transparent" 
+                                onClick={() => setIsDropdownOpen(false)}
+                              />
+                              
+                              {/* Dropdown Options Box */}
+                              <div className="absolute left-0 right-0 mt-1.5 p-2 bg-white border border-gray-150 rounded-2xl shadow-lg z-50 max-h-68 flex flex-col animate-scale-in">
+                                {/* Search bar input container */}
+                                <div className="relative m-1 mb-2">
+                                  <span className="absolute left-3 top-2.5 text-gray-450 text-xs">🔍</span>
+                                  <input
+                                    type="text"
+                                    placeholder="Search domain or project..."
+                                    value={dropdownSearch}
+                                    onChange={(e) => setDropdownSearch(e.target.value)}
+                                    className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-gray-200 focus:border-indigo-505 rounded-xl text-xs text-gray-955 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-505"
+                                    autoFocus
+                                  />
+                                </div>
+
+                                {/* Scrolled list */}
+                                <div className="overflow-y-auto max-h-48 space-y-0.5 pr-1">
+                                  {(() => {
+                                    const filtered = projects.filter((p) => {
+                                      const term = dropdownSearch.toLowerCase().trim();
+                                      const domainMatch = p.domain ? p.domain.toLowerCase().includes(term) : false;
+                                      const nameMatch = p.name ? p.name.toLowerCase().includes(term) : false;
+                                      return domainMatch || nameMatch;
+                                    });
+
+                                    if (filtered.length === 0) {
+                                      return (
+                                        <div className="p-3 text-center text-xs text-gray-400 select-none font-medium">
+                                          No matching domains found
+                                        </div>
+                                      );
+                                    }
+
+                                    return filtered.map((p) => {
+                                      const isSelected = work.projectId === p.id;
+                                      return (
+                                        <button
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                            handleUpdateWorkBlock(idx, { projectId: p.id });
+                                            setIsDropdownOpen(false);
+                                            setDropdownSearch('');
+                                          }}
+                                          className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                                            isSelected
+                                              ? 'bg-indigo-50 text-indigo-700'
+                                              : 'hover:bg-slate-50 text-gray-800'
+                                          }`}
+                                        >
+                                          <span className="truncate">{p.domain || p.name}</span>
+                                          {isSelected && <span className="text-indigo-650 shrink-0 font-extrabold text-[10px]">✓</span>}
+                                        </button>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Dynamic Keywords Multi-Select Sub-Section (Placed Under Domain) */}
+                      {(() => {
+                        const matchedProj = projects.find((p) => p.id === work.projectId);
+                        const kws = (matchedProj?.keywords || []).filter(Boolean);
+                        if (kws.length === 0) return null;
+
+                        return (
+                          <div id="keywords-selector-container" className="space-y-2 p-4 bg-slate-50/50 rounded-2xl border border-gray-150 shadow-3xs">
+                            <span className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                              Select Keywords
+                            </span>
+                            <div className="flex flex-wrap gap-2">
+                              {kws.map((kw) => {
+                                const currentKeywords = work.selectedKeywords || [];
+                                const selected = currentKeywords.includes(kw);
+                                const selectedIdx = currentKeywords.indexOf(kw);
+                                const selectionNumber = selectedIdx !== -1 ? selectedIdx + 1 : null;
+
+                                return (
+                                  <button
+                                    key={kw}
+                                    type="button"
+                                    onClick={() => {
+                                      const next = selected
+                                        ? currentKeywords.filter((k: string) => k !== kw)
+                                        : [...currentKeywords, kw];
+                                      if (next.length <= 8) {
+                                        handleUpdateWorkBlock(idx, { selectedKeywords: next });
+                                      }
+                                    }}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition select-none cursor-pointer ${
+                                      selected
+                                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                        : 'bg-white hover:bg-slate-100 border-gray-200 text-gray-700'
+                                    }`}
+                                  >
+                                    {selected ? (
+                                      <span className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center text-[9px] font-black shrink-0 leading-none">
+                                        {selectionNumber}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400">#</span>
+                                    )}
+                                    <span className="truncate leading-none select-none">{kw}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>                    {/* Section: Work Type */}
                     <div className="space-y-6">
                       <div className="flex items-center gap-2 border-b border-gray-150 pb-3">
@@ -434,8 +598,7 @@ export default function DSRForm({
                               <span className="block text-[10px] font-extrabold text-indigo-950 uppercase tracking-widest">
                                 🚀 SEO Submission Quantities
                               </span>
-                              
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                                 {/* 1. Blogs / Articles count */}
                                 <div className="flex items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-gray-150 shadow-2xs">
                                   <label htmlFor={`blog-cnt-${idx}`} className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5 shrink-0 select-none">
@@ -445,12 +608,15 @@ export default function DSRForm({
                                   <input
                                     id={`blog-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.blogCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { blogCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { blogCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -463,12 +629,15 @@ export default function DSRForm({
                                   <input
                                     id={`listing-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.listingCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { listingCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { listingCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -481,12 +650,15 @@ export default function DSRForm({
                                   <input
                                     id={`forum-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.forumCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { forumCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { forumCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -499,12 +671,15 @@ export default function DSRForm({
                                   <input
                                     id={`pdf-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.pdfCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { pdfCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { pdfCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -517,12 +692,15 @@ export default function DSRForm({
                                   <input
                                     id={`image-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.imageCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { imageCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { imageCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -535,12 +713,15 @@ export default function DSRForm({
                                   <input
                                     id={`videoppt-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.videoPptCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { videoPptCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { videoPptCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -553,12 +734,15 @@ export default function DSRForm({
                                   <input
                                     id={`profile-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.profileCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { profileCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { profileCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -571,12 +755,15 @@ export default function DSRForm({
                                   <input
                                     id={`link-cnt-${idx}`}
                                     type="number"
+                                    min="0"
                                     placeholder="0"
                                     value={work.linkCount}
                                     onChange={(e) => {
-                                      handleUpdateWorkBlock(idx, { linkCount: e.target.value });
+                                      const val = e.target.value;
+                                      if (val !== '' && Number(val) < 0) return;
+                                      handleUpdateWorkBlock(idx, { linkCount: val });
                                     }}
-                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                    className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-305 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                   />
                                 </div>
 
@@ -590,16 +777,19 @@ export default function DSRForm({
                                     <input
                                       id={`custom-cnt-${type.id}-${idx}`}
                                       type="number"
+                                      min="0"
                                       placeholder="0"
                                       value={work.customValues?.[type.id] !== undefined ? work.customValues[type.id] : ''}
                                       onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val !== '' && Number(val) < 0) return;
                                         const nextCustomValues = {
                                           ...(work.customValues || {}),
-                                          [type.id]: e.target.value
+                                          [type.id]: val
                                         };
                                         handleUpdateWorkBlock(idx, { customValues: nextCustomValues });
                                       }}
-                                      className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-950 font-bold placeholder-gray-350 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
+                                      className="w-20 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold placeholder-gray-350 focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-sm font-mono text-center"
                                     />
                                   </div>
                                 ))}
@@ -655,13 +845,7 @@ export default function DSRForm({
                                   <input
                                     type="checkbox"
                                     checked={(work.contentUpdates || []).includes('meta_title_desc')}
-                                    onChange={() => {
-                                      const current = work.contentUpdates || [];
-                                      const next = current.includes('meta_title_desc')
-                                        ? current.filter((o: string) => o !== 'meta_title_desc')
-                                        : [...current, 'meta_title_desc'];
-                                      handleUpdateWorkBlock(idx, { contentUpdates: next });
-                                    }}
+                                    onChange={() => handleToggleContentUpdate(idx, 'meta_title_desc')}
                                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-505 border-gray-300 cursor-pointer"
                                   />
                                   <span className="text-xs font-bold text-gray-800">Meta Title & Description</span>
@@ -672,13 +856,7 @@ export default function DSRForm({
                                   <input
                                     type="checkbox"
                                     checked={(work.contentUpdates || []).includes('keyword_update')}
-                                    onChange={() => {
-                                      const current = work.contentUpdates || [];
-                                      const next = current.includes('keyword_update')
-                                        ? current.filter((o: string) => o !== 'keyword_update')
-                                        : [...current, 'keyword_update'];
-                                      handleUpdateWorkBlock(idx, { contentUpdates: next });
-                                    }}
+                                    onChange={() => handleToggleContentUpdate(idx, 'keyword_update')}
                                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-505 border-gray-300 cursor-pointer"
                                   />
                                   <span className="text-xs font-bold text-gray-800">Keyword Update</span>
@@ -689,13 +867,7 @@ export default function DSRForm({
                                   <input
                                     type="checkbox"
                                     checked={(work.contentUpdates || []).includes('section_update')}
-                                    onChange={() => {
-                                      const current = work.contentUpdates || [];
-                                      const next = current.includes('section_update')
-                                        ? current.filter((o: string) => o !== 'section_update')
-                                        : [...current, 'section_update'];
-                                      handleUpdateWorkBlock(idx, { contentUpdates: next });
-                                    }}
+                                    onChange={() => handleToggleContentUpdate(idx, 'section_update')}
                                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-505 border-gray-300 cursor-pointer"
                                   />
                                   <span className="text-xs font-bold text-gray-800">Section Update</span>
@@ -706,13 +878,7 @@ export default function DSRForm({
                                   <input
                                     type="checkbox"
                                     checked={(work.contentUpdates || []).includes('restructure')}
-                                    onChange={() => {
-                                      const current = work.contentUpdates || [];
-                                      const next = current.includes('restructure')
-                                        ? current.filter((o: string) => o !== 'restructure')
-                                        : [...current, 'restructure'];
-                                      handleUpdateWorkBlock(idx, { contentUpdates: next });
-                                    }}
+                                    onChange={() => handleToggleContentUpdate(idx, 'restructure')}
                                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-505 border-gray-300 cursor-pointer"
                                   />
                                   <span className="text-xs font-bold text-gray-800">Restructure</span>
@@ -723,53 +889,6 @@ export default function DSRForm({
                         </div>
 
                       </div>
-
-                      {/* Dynamic Keywords Multi-Select Sub-Section */}
-                      {(() => {
-                        const matchedProj = projects.find((p) => p.id === work.projectId);
-                        const kws = (matchedProj?.keywords || []).filter(Boolean);
-                        if (kws.length === 0) return null;
-
-                        return (
-                          <div id="keywords-selector-container" className="space-y-3.5 border border-amber-100 bg-amber-50/10 rounded-2xl p-5">
-                            <span className="block text-[10px] font-black text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
-                              📌 Keywords Selection
-                            </span>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-white p-4 rounded-xl border border-amber-150 shadow-2xs">
-                              {kws.map((kw) => {
-                                const selected = (work.selectedKeywords || []).includes(kw);
-                                return (
-                                  <label key={kw} className={`flex items-center gap-2.5 p-2 px-3 rounded-lg border cursor-pointer transition select-none ${
-                                    selected
-                                      ? 'bg-amber-50 text-amber-900 border-amber-200'
-                                      : 'hover:bg-slate-50 border-gray-100 text-gray-755'
-                                  }`}>
-                                    <input
-                                      type="checkbox"
-                                      checked={selected}
-                                      onChange={() => {
-                                        const current = work.selectedKeywords || [];
-                                        const next = current.includes(kw)
-                                          ? current.filter((k: string) => k !== kw)
-                                          : [...current, kw];
-                                        if (next.length <= 8) {
-                                          handleUpdateWorkBlock(idx, { selectedKeywords: next });
-                                        }
-                                      }}
-                                      className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-gray-300 cursor-pointer"
-                                    />
-                                    <span className="text-xs font-bold truncate select-none leading-none" title={kw}>
-                                      {kw}
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Row 3: Work Summary / Work Type note section to write anything */}
                       <div className="space-y-2">
                         <label htmlFor={`work-summary-${idx}`} className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
                           📝 Work Notes / Summary

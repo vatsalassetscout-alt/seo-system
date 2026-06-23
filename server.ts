@@ -52,19 +52,67 @@ const defaultSubmissions: any[] = [];
 // GOOGLE SHEETS CORE SYNCHRONIZATION UTILITIES
 // ==========================================
 
-const getGoogleAccessToken = async (): Promise<string | null> => {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  let rawKey = process.env.GOOGLE_PRIVATE_KEY;
+const isPlaceholder = (val: string | undefined): boolean => {
+  if (!val) return true;
+  const trimmed = val.trim();
+  const lower = trimmed.toLowerCase();
+  return (
+    trimmed === "" ||
+    lower.startsWith("your-") ||
+    lower.includes("your-project") ||
+    lower.includes("placeholder") ||
+    lower.includes("...\n") ||
+    lower.includes("your-google-") ||
+    lower === "your-google-sheets-api-key" ||
+    lower === "your-service-account@your-project.iam.gserviceaccount.com" ||
+    lower === "-----begin private key-----\n...\n-----end private key-----" ||
+    lower.includes("your-google-spreadsheet-id") ||
+    lower.includes("your-projects-spreadsheet-id") ||
+    lower.includes("your-submissions-spreadsheet-id")
+  );
+};
 
-  if (!email || !rawKey) {
-    console.log("⚠️ Google Service Account credentials not fully configured in env.");
+const getGoogleAccessToken = async (): Promise<string | null> => {
+  let email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
+  let rawKey = process.env.GOOGLE_PRIVATE_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+
+  if (!rawKey) {
+    console.log("⚠️ No service account key found in environment variable GOOGLE_PRIVATE_KEY.");
+    return null;
+  }
+
+  // Check if rawKey is a JSON string of a service account
+  let parsedEmail = email;
+  let parsedKey = rawKey;
+
+  try {
+    const trimmedKey = rawKey.trim();
+    if (trimmedKey.startsWith('{') && trimmedKey.endsWith('}')) {
+      const sa = JSON.parse(trimmedKey);
+      if (sa.client_email) parsedEmail = sa.client_email;
+      if (sa.private_key) parsedKey = sa.private_key;
+    }
+  } catch (e) {
+    console.warn("Attempted to parse service account key as JSON but failed, continuing as raw key format:", e);
+  }
+
+  // Clean the email and private key of extra wrapping quotes (e.g. from env vars setup in UI)
+  if (parsedEmail) {
+    parsedEmail = parsedEmail.trim().replace(/^['"]|['"]$/g, '');
+  }
+  if (parsedKey) {
+    parsedKey = parsedKey.trim().replace(/^['"]|['"]$/g, '');
+  }
+
+  if (!parsedEmail || !parsedKey || isPlaceholder(parsedEmail) || isPlaceholder(parsedKey)) {
+    console.log("⚠️ Google Service Account credentials not fully configured in env or are placeholders.");
     return null;
   }
 
   try {
-    const privateKey = rawKey.replace(/\\n/g, '\n');
+    const privateKey = parsedKey.replace(/\\n/g, '\n');
     const jwt = new JWT({
-      email,
+      email: parsedEmail,
       key: privateKey,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
@@ -79,13 +127,13 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
 
 const getGoogleAuth = async (req: any): Promise<{ token: string; isApiKey: boolean } | null> => {
   // 0. Check directly hardcoded API Key first
-  if (DIRECT_GOOGLE_API_KEY && DIRECT_GOOGLE_API_KEY.trim()) {
+  if (DIRECT_GOOGLE_API_KEY && DIRECT_GOOGLE_API_KEY.trim() && !isPlaceholder(DIRECT_GOOGLE_API_KEY)) {
     return { token: DIRECT_GOOGLE_API_KEY.trim(), isApiKey: true };
   }
 
   // 1. Check if client passed a custom API Key via the header
   const clientApiKey = req.headers['x-google-api-key'];
-  if (clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim()) {
+  if (clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim() && !isPlaceholder(clientApiKey)) {
     return { token: clientApiKey.trim(), isApiKey: true };
   }
 
@@ -93,14 +141,14 @@ const getGoogleAuth = async (req: any): Promise<{ token: string; isApiKey: boole
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const bearerToken = authHeader.substring(7).trim();
-    if (bearerToken && bearerToken !== "undefined" && bearerToken !== "null" && bearerToken.length > 5) {
+    if (bearerToken && bearerToken !== "undefined" && bearerToken !== "null" && bearerToken.length > 5 && !isPlaceholder(bearerToken)) {
       return { token: bearerToken, isApiKey: false };
     }
   }
 
   // 3. Fallback to Server environment variables: GOOGLE_API_KEY
   const envApiKey = process.env.GOOGLE_API_KEY;
-  if (envApiKey && envApiKey.trim()) {
+  if (envApiKey && envApiKey.trim() && !isPlaceholder(envApiKey)) {
     return { token: envApiKey.trim(), isApiKey: true };
   }
 
@@ -919,24 +967,30 @@ app.post("/api/auth/verify", (req, res) => {
 
 const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null => {
   // 0. Check directly hardcoded Spreadsheet ID first
-  if (DIRECT_SPREADSHEET_ID && DIRECT_SPREADSHEET_ID.trim()) {
+  if (DIRECT_SPREADSHEET_ID && DIRECT_SPREADSHEET_ID.trim() && !isPlaceholder(DIRECT_SPREADSHEET_ID)) {
     return DIRECT_SPREADSHEET_ID.trim();
   }
 
   // Always prioritize environment variables if configured
   const envId = type === 'projects' ? process.env.GOOGLE_PROJECTS_SPREADSHEET_ID : process.env.GOOGLE_LOGS_SPREADSHEET_ID;
-  if (envId && envId.trim()) {
+  if (envId && envId.trim() && !isPlaceholder(envId)) {
     return envId.trim();
+  }
+
+  // Check fallback general GOOGLE_SPREADSHEET_ID environment variable
+  const generalEnvId = process.env.GOOGLE_SPREADSHEET_ID;
+  if (generalEnvId && generalEnvId.trim() && !isPlaceholder(generalEnvId)) {
+    return generalEnvId.trim();
   }
 
   const specificHeaderKey = type === 'projects' ? 'x-projects-spreadsheet-id' : 'x-logs-spreadsheet-id';
   const specificHeaderId = req.headers[specificHeaderKey];
-  if (specificHeaderId && typeof specificHeaderId === 'string' && specificHeaderId.trim()) {
+  if (specificHeaderId && typeof specificHeaderId === 'string' && specificHeaderId.trim() && !isPlaceholder(specificHeaderId)) {
     return specificHeaderId.trim();
   }
 
   const headerId = req.headers['x-spreadsheet-id'];
-  if (headerId && typeof headerId === 'string' && headerId.trim()) {
+  if (headerId && typeof headerId === 'string' && headerId.trim() && !isPlaceholder(headerId)) {
     return headerId.trim();
   }
 

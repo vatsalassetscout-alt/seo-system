@@ -100,24 +100,16 @@ export default function DSRSettings({
   onAddAlert = () => {},
 }: DSRSettingsProps) {
   // Navigation Tabs inside Settings Panel
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'assignments' | 'sheets'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'assignments'>('users');
 
   // Input states
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
 
-  // Sheets settings states
-  const [projectsSpreadsheetId, setProjectsSpreadsheetId] = useState(sheetSettings?.projectsSpreadsheetId || sheetSettings?.spreadsheetId || '');
-  const [logsSpreadsheetId, setLogsSpreadsheetId] = useState(sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId || '');
-  const [projectsTab, setProjectsTab] = useState(sheetSettings?.projectsTab || 'Projects_Mapping');
-  const [submissionsTab, setSubmissionsTab] = useState(sheetSettings?.submissionsTab || 'DSR_Logs');
-  const [locationsTab, setLocationsTab] = useState(sheetSettings?.locationsTab || 'Locations');
-  
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
   const [serviceAccountConfigured, setServiceAccountConfigured] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const [sheetsTesting, setSheetsTesting] = useState(false);
 
   useEffect(() => {
     fetch('/api/config-status')
@@ -141,38 +133,6 @@ export default function DSRSettings({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000);
       });
-  };
-
-  const handleSaveSheetSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSheetsTesting(true);
-    try {
-      await onUpdateSheetSettings({
-        projectsSpreadsheetId: projectsSpreadsheetId.trim(),
-        logsSpreadsheetId: logsSpreadsheetId.trim(),
-        spreadsheetId: (projectsSpreadsheetId || logsSpreadsheetId).trim(),
-        projectsTab: projectsTab.trim(),
-        submissionsTab: submissionsTab.trim(),
-        locationsTab: locationsTab.trim(),
-        isConnected: true
-      });
-      triggerAlert('success', 'Google Spreadsheet IDs and tab names saved successfully!');
-      
-      // Delay slightly for State update to serialize
-      setTimeout(async () => {
-        try {
-          await onTriggerSync();
-          triggerAlert('success', 'Synchronisation completed successfully! Projects & submissions are loaded.');
-        } catch (syncErr: any) {
-          console.error(syncErr);
-          triggerAlert('error', `Spreadsheet IDs saved but Synchronisation failed. Make sure your Google Sheets are shared with the Google Service Account as Editor.`);
-        }
-      }, 300);
-    } catch (err: any) {
-      triggerAlert('error', `Failed to update settings: ${err.message || err}`);
-    } finally {
-      setSheetsTesting(false);
-    }
   };
 
 
@@ -277,19 +237,29 @@ export default function DSRSettings({
           <Lock size={15} />
           Assign Project
         </button>
-
-        <button
-          onClick={() => setActiveSubTab('sheets')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeSubTab === 'sheets'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <FileSpreadsheet size={15} />
-          Google Sheets Config
-        </button>
       </div>
+
+      {serviceAccountEmail && (
+        <div className="bg-slate-50 border border-gray-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-0.5 text-left">
+            <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+              🟢 Google Sheets Active Backend Integration
+            </h4>
+            <p className="text-[11px] text-gray-500">
+              The application automatically syncs and persists database logs to Google Sheets. Share your spreadsheet with this Service Account:
+            </p>
+            <span className="font-mono text-[10px] text-indigo-600 block mt-1 font-bold select-all bg-white px-2 py-1 rounded inline-block border border-gray-150">
+              {serviceAccountEmail}
+            </span>
+          </div>
+          <button
+            onClick={handleCopyEmail}
+            className="px-4 py-2 bg-white hover:bg-slate-50 text-indigo-600 hover:text-indigo-800 border border-gray-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer w-fit shrink-0 shadow-3xs"
+          >
+            {isCopied ? <span className="text-emerald-600 font-bold">Copied Email!</span> : <>Copy Service Email</>}
+          </button>
+        </div>
+      )}
 
       {/* Sub-Alert status notifications */}
       {statusMsg && (
@@ -618,172 +588,6 @@ export default function DSRSettings({
                       </tbody>
                     </table>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: Google Sheets Database Integration */}
-        {activeSubTab === 'sheets' && (
-          <div className="space-y-8 animate-fade-in text-left">
-            <div className="border-b border-gray-100 pb-4">
-              <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
-                <FileSpreadsheet size={16} className="text-indigo-600" />
-                Google Sheets Database Integration
-              </h4>
-              <p className="text-xs text-gray-450">
-                Synchronise this application's master projects list, submissions, alerts/notes, and activity audit logs directly with your Google Sheets spreadsheet!
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {/* Credentials Card */}
-              <div className="md:col-span-1 bg-slate-50/50 p-6 rounded-2xl border border-gray-150 h-fit space-y-4">
-                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
-                  🔑 Service Account
-                </h5>
-                
-                <div className="space-y-3 text-xs">
-                  <div className="p-3 bg-white border border-gray-200 rounded-xl space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-gray-400">Server Authentication</span>
-                    <div className="flex items-center gap-1.5 font-bold">
-                      {serviceAccountConfigured ? (
-                        <span className="text-emerald-600 flex items-center gap-1">🟢 Connected</span>
-                      ) : (
-                        <span className="text-amber-600 flex items-center gap-1">⚠️ Local Fallback (No Server Credentials)</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {serviceAccountEmail && (
-                    <div className="p-3 bg-white border border-gray-200 rounded-xl space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Service Account Email</span>
-                      <span className="font-mono text-[9px] text-gray-750 block break-all font-bold select-all bg-gray-50 p-1.5 rounded">{serviceAccountEmail}</span>
-                      <button
-                        onClick={handleCopyEmail}
-                        className="mt-2 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        {isCopied ? <span className="text-emerald-600 font-bold">Copied!</span> : <>Copy Address</>}
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="p-4 bg-amber-50/40 border border-amber-100 rounded-xl space-y-2 text-amber-900 leading-relaxed">
-                    <h6 className="font-bold text-[10px]">💡 SETUP INSTRUCTIONS:</h6>
-                    <ol className="list-decimal list-inside space-y-1 text-[9px] text-amber-950 font-medium">
-                      <li>Copy the Service Account Email address above.</li>
-                      <li>Go to your Google Spreadsheet and click <strong>Share</strong>.</li>
-                      <li>Add the copied address as an <strong>Editor</strong> and click Share.</li>
-                      <li>Save Spreadsheet IDs and tab names on the right side.</li>
-                    </ol>
-                  </div>
-                </div>
-              </div>
-
-              {/* Form Config spreadsheet IDs */}
-              <div className="md:col-span-2 space-y-6">
-                <form onSubmit={handleSaveSheetSettings} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
-                        Projects Spreadsheet ID / URL
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Google Spreadsheet ID or URL"
-                        value={projectsSpreadsheetId}
-                        onChange={(e) => setProjectsSpreadsheetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
-                        Logs & Activities Spreadsheet ID / URL
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Google Spreadsheet ID or URL"
-                        value={logsSpreadsheetId}
-                        onChange={(e) => setLogsSpreadsheetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
-                        Projects Tab Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Projects_Mapping"
-                        value={projectsTab}
-                        onChange={(e) => setProjectsTab(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
-                        DSR Logs Tab Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="DSR_Logs"
-                        value={submissionsTab}
-                        onChange={(e) => setSubmissionsTab(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-bold block uppercase">
-                        Locations Tab Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Locations"
-                        value={locationsTab}
-                        onChange={(e) => setLocationsTab(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="submit"
-                      disabled={sheetsTesting || isSyncing}
-                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                    >
-                      {sheetsTesting || isSyncing ? (
-                        <>
-                          <RefreshCw size={13} className="animate-spin" />
-                          Testing Connection & Syncing...
-                        </>
-                      ) : (
-                        <>
-                          Save & Synchronise
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-
-                {/* Submissions stats details summary */}
-                <div className="p-4 bg-indigo-50/30 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-2">
-                  <h6 className="font-bold flex items-center gap-1 text-slate-800">
-                    ℹ️ Integration Matrix:
-                  </h6>
-                  <ul className="list-disc list-inside space-y-1 text-gray-650 text-[11px] leading-relaxed">
-                    <li><strong>Bi-directional Projects Sync:</strong> Changes in mapping sheets populate immediately inside system; additions push right back.</li>
-                    <li><strong>Real-time Work Logs Appending:</strong> Work status and counts write live to Google Sheets under <code>DSR_Logs</code>.</li>
-                    <li><strong>System Activity Trail:</strong> User logins, notes, project creations and setting adjustments logged automatically in Google Sheets under <code>Activity_Logs</code> worksheet.</li>
-                    <li><strong>Notes & Alerts Persistence:</strong> Stick-notes, reminders, and user assignments are securely read/write synced with Google Sheets under <code>System_Alerts</code>.</li>
-                  </ul>
                 </div>
               </div>
             </div>

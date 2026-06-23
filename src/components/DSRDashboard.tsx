@@ -631,7 +631,7 @@ export default function DSRDashboard({
 
   // Tab 1: Project Table data computing
   const projectTableData = useMemo(() => {
-    return filteredProjectsForMetrics.map((p, idx) => {
+    const rawList = filteredProjectsForMetrics.map((p) => {
       const pWorks = filteredWorks.filter(w => w.projectId === p.id);
       
       const listings = pWorks.reduce((sum, w) => sum + (w.listingCount || 0), 0);
@@ -687,9 +687,20 @@ export default function DSRDashboard({
         lastWorked,
         priority: p.priority,
         frequency: p.frequency,
-        srNo: idx + 1
       };
     });
+
+    const weights: Record<string, number> = { P1: 1, P2: 2, P3: 3 };
+    rawList.sort((a, b) => {
+      const wA = weights[a.priority || ''] || 999;
+      const wB = weights[b.priority || ''] || 999;
+      return wA - wB;
+    });
+
+    return rawList.map((item, idx) => ({
+      ...item,
+      srNo: idx + 1
+    }));
   }, [filteredProjectsForMetrics, filteredWorks]);
 
   // Computation of days in current selection
@@ -1417,7 +1428,7 @@ export default function DSRDashboard({
 
               </div>
               <div className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">
-                Sorted by original declaration index
+                Sorted by priority (P1 first)
               </div>
             </div>
 
@@ -1429,7 +1440,6 @@ export default function DSRDashboard({
                     <th className="px-4 py-3">Project Name</th>
                     <th className="px-4 py-3">Domain</th>
                     <th className="px-4 py-3 w-28">Priority</th>
-                    <th className="px-4 py-3 w-28 text-center">SEO Stats</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
                     {isAdmin && <th className="px-4 py-3">Assigned To</th>}
@@ -1438,7 +1448,6 @@ export default function DSRDashboard({
                 </thead>
                 <tbody className="divide-y divide-gray-150">
                   {projectTableData.map((item) => {
-                    const isExpanded = !!expandedProjectStats[item.id];
                     return (
                       <React.Fragment key={item.id}>
                         {/* Main row */}
@@ -1475,17 +1484,6 @@ export default function DSRDashboard({
                                 — none —
                               </span>
                             )}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => toggleProjectStats(item.id)}
-                              className="inline-flex items-center gap-1.5 bg-indigo-50/50 hover:bg-indigo-100/75 text-indigo-800 font-bold px-2 py-1 rounded border border-indigo-100 transition duration-75 text-[11px] cursor-pointer"
-                              title="Click to toggle cumulative backlog stats"
-                            >
-                              <span>Stats</span>
-                              {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                            </button>
                           </td>
                           <td className="px-4 py-3 text-center font-mono font-bold text-gray-700">
                             {item.timesWorked}
@@ -1525,43 +1523,6 @@ export default function DSRDashboard({
                             </td>
                           )}
                         </tr>
-
-                        {/* Expandable distribution details sub-row */}
-                        {isExpanded && (
-                          <tr className="bg-slate-50/30">
-                            <td colSpan={isAdmin ? 9 : 7} className="px-6 py-3 border-t border-b border-gray-150">
-                              <div className="bg-white p-3.5 rounded-xl border border-gray-150 space-y-3.5">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-bold text-xs text-gray-800 flex items-center gap-1.5">
-                                    📊 Detailed SEO Volumetrics for <span className="text-indigo-650 font-black">{item.name}</span>
-                                  </span>
-                                  <span className="text-[10px] text-gray-400 font-medium">Cumulative numbers</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                  <div className="bg-indigo-50/10 p-2.5 rounded-lg border border-indigo-100/50">
-                                    <span className="block text-[9px] font-bold text-indigo-700 uppercase">Listings</span>
-                                    <span className="block text-base font-extrabold text-indigo-950 font-mono mt-0.5">{item.listings}</span>
-                                  </div>
-                                  <div className="bg-emerald-50/15 p-2.5 rounded-lg border border-emerald-100/50">
-                                    <span className="block text-[9px] font-bold text-emerald-800 uppercase">Blogs</span>
-                                    <span className="block text-base font-extrabold text-emerald-950 font-mono mt-0.5">{item.blogs}</span>
-                                  </div>
-                                  <div className="bg-teal-50/15 p-2.5 rounded-lg border border-teal-100/50">
-                                    <span className="block text-[9px] font-bold text-teal-800 uppercase">PDFs</span>
-                                    <span className="block text-base font-extrabold text-teal-900 font-mono mt-0.5">{item.pdfs}</span>
-                                  </div>
-                                  <div className="bg-rose-50/15 p-2.5 rounded-lg border border-rose-100/50">
-                                    <span className="block text-[9px] font-bold text-rose-700 uppercase">Images</span>
-                                    <span className="block text-base font-extrabold text-rose-950 font-mono mt-0.5">{item.images}</span>
-                                  </div>
-                                </div>
-                                <div className="text-[10px] text-gray-500 italic">
-                                  ✓ Reports synchronized from developer spreadsheets and individual task forms successfully.
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   })}
@@ -1694,9 +1655,34 @@ export default function DSRDashboard({
                             </div>
                           ) : (
                             item.assignedFrequency ? (
-                              <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 text-[10px] uppercase tracking-wider">
-                                {item.assignedFrequency}
-                              </span>
+                              (() => {
+                                const raw = Number(item.assignedFrequency);
+                                if (isNaN(raw)) {
+                                  return (
+                                    <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 text-[10px] uppercase tracking-wider">
+                                      {item.assignedFrequency}
+                                    </span>
+                                  );
+                                }
+                                let val = raw;
+                                let suffix = 'wk';
+                                if (freqFilterType === 'daily') {
+                                  val = raw / 7;
+                                  suffix = 'day';
+                                } else if (freqFilterType === 'weekly') {
+                                  val = raw;
+                                  suffix = 'wk';
+                                } else if (freqFilterType === 'monthly') {
+                                  val = raw * (30 / 7);
+                                  suffix = 'mo';
+                                }
+                                const formatted = val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+                                return (
+                                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 text-[10.5px] uppercase tracking-wider font-mono">
+                                    {formatted}/{suffix}
+                                  </span>
+                                );
+                              })()
                             ) : (
                               <span className="text-gray-350 italic font-normal text-[11px]">Unassigned</span>
                             )
@@ -2607,8 +2593,6 @@ export default function DSRDashboard({
                       <th className="px-4 py-3">Project Name</th>
                       <th className="px-4 py-3">Domain</th>
                       <th className="px-4 py-3">Keyword</th>
-                      <th className="px-4 py-3 w-28 text-center">Priority</th>
-                      <th className="px-4 py-3 w-28 text-center">Frequency</th>
                       <th className="px-4 py-3">Ranking</th>
                       <th className="px-4 py-3 text-center">Times Worked</th>
                       <th className="px-4 py-3">Last Worked</th>
@@ -2648,41 +2632,6 @@ export default function DSRDashboard({
                           <span className="inline-block bg-amber-50 text-amber-900 font-extrabold px-2.5 py-1 rounded-xl border border-amber-200/50 text-[11px] font-mono shadow-3xs">
                             {item.keyword}
                           </span>
-                        </td>
-
-                        {/* Priority Column */}
-                        <td className="px-4 py-3.5 text-center">
-                          {item.priority === 'P1' && (
-                            <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded border border-red-100 uppercase tracking-wider">
-                              🚨 P1 High
-                            </span>
-                          )}
-                          {item.priority === 'P2' && (
-                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wider">
-                              ⚡ P2 Med
-                            </span>
-                          )}
-                          {item.priority === 'P3' && (
-                            <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
-                              🟢 P3 Low
-                            </span>
-                          )}
-                          {!['P1', 'P2', 'P3'].includes(item.priority || '') && (
-                            <span className="text-[10px] font-bold text-gray-400 italic">
-                              —
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Frequency Column */}
-                        <td className="px-4 py-3.5 text-center">
-                          {item.frequency ? (
-                            <span className="inline-flex items-center gap-1.5 bg-indigo-50/50 text-indigo-800 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100 text-[11px]">
-                              {item.frequency} / wk
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-gray-400 italic">—</span>
-                          )}
                         </td>
 
                         {/* Ranking Column (Blank) */}
