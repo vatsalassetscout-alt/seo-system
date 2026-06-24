@@ -125,37 +125,50 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
   }
 };
 
+const cleanConfigValue = (val: string | undefined): string => {
+  if (!val) return "";
+  return val.trim().replace(/^['"]|['"]$/g, '').trim();
+};
+
 const getGoogleAuth = async (req: any): Promise<{ token: string; isApiKey: boolean } | null> => {
   // 0. Check directly hardcoded API Key first
-  if (DIRECT_GOOGLE_API_KEY && DIRECT_GOOGLE_API_KEY.trim() && !isPlaceholder(DIRECT_GOOGLE_API_KEY)) {
-    return { token: DIRECT_GOOGLE_API_KEY.trim(), isApiKey: true };
+  const cleanDirectKey = cleanConfigValue(DIRECT_GOOGLE_API_KEY);
+  if (cleanDirectKey && !isPlaceholder(cleanDirectKey)) {
+    return { token: cleanDirectKey, isApiKey: true };
   }
 
   // 1. Check if client passed a custom API Key via the header
   const clientApiKey = req.headers['x-google-api-key'];
-  if (clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim() && !isPlaceholder(clientApiKey)) {
-    return { token: clientApiKey.trim(), isApiKey: true };
+  if (clientApiKey && typeof clientApiKey === 'string') {
+    const cleanClientKey = cleanConfigValue(clientApiKey);
+    if (cleanClientKey && !isPlaceholder(cleanClientKey)) {
+      return { token: cleanClientKey, isApiKey: true };
+    }
   }
 
   // 2. Check if a client OAuth Authorization header is passed
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const bearerToken = authHeader.substring(7).trim();
-    if (bearerToken && bearerToken !== "undefined" && bearerToken !== "null" && bearerToken.length > 5 && !isPlaceholder(bearerToken)) {
-      return { token: bearerToken, isApiKey: false };
+    const bearerToken = authHeader.substring(7);
+    const cleanBearerToken = cleanConfigValue(bearerToken);
+    if (cleanBearerToken && cleanBearerToken !== "undefined" && cleanBearerToken !== "null" && cleanBearerToken.length > 5 && !isPlaceholder(cleanBearerToken)) {
+      return { token: cleanBearerToken, isApiKey: false };
     }
   }
 
-  // 3. Fallback to Server environment variables: GOOGLE_API_KEY
-  const envApiKey = process.env.GOOGLE_API_KEY;
-  if (envApiKey && envApiKey.trim() && !isPlaceholder(envApiKey)) {
-    return { token: envApiKey.trim(), isApiKey: true };
-  }
-
-  // 4. Finally, try standard service account if available in system environment
+  // 3. Prefer standard service account if available in system environment
   const token = await getGoogleAccessToken();
   if (token) {
     return { token, isApiKey: false };
+  }
+
+  // 4. Fallback to Server environment variables: GOOGLE_API_KEY
+  const envApiKey = process.env.GOOGLE_API_KEY;
+  if (envApiKey) {
+    const cleanEnvKey = cleanConfigValue(envApiKey);
+    if (cleanEnvKey && !isPlaceholder(cleanEnvKey)) {
+      return { token: cleanEnvKey, isApiKey: true };
+    }
   }
 
   return null;
@@ -967,48 +980,67 @@ app.post("/api/auth/verify", (req, res) => {
 
 const getSpreadsheetId = (req: any, type: 'projects' | 'logs'): string | null => {
   // 0. Check directly hardcoded Spreadsheet ID first
-  if (DIRECT_SPREADSHEET_ID && DIRECT_SPREADSHEET_ID.trim() && !isPlaceholder(DIRECT_SPREADSHEET_ID)) {
-    return DIRECT_SPREADSHEET_ID.trim();
+  const cleanDirectId = cleanConfigValue(DIRECT_SPREADSHEET_ID);
+  if (cleanDirectId && !isPlaceholder(cleanDirectId)) {
+    return cleanDirectId;
   }
 
   // Always prioritize environment variables if configured
   const envId = type === 'projects' ? process.env.GOOGLE_PROJECTS_SPREADSHEET_ID : process.env.GOOGLE_LOGS_SPREADSHEET_ID;
-  if (envId && envId.trim() && !isPlaceholder(envId)) {
-    return envId.trim();
+  const cleanEnvId = cleanConfigValue(envId);
+  if (cleanEnvId && !isPlaceholder(cleanEnvId)) {
+    return cleanEnvId;
   }
 
   // Check fallback general GOOGLE_SPREADSHEET_ID environment variable
   const generalEnvId = process.env.GOOGLE_SPREADSHEET_ID;
-  if (generalEnvId && generalEnvId.trim() && !isPlaceholder(generalEnvId)) {
-    return generalEnvId.trim();
+  const cleanGeneralEnvId = cleanConfigValue(generalEnvId);
+  if (cleanGeneralEnvId && !isPlaceholder(cleanGeneralEnvId)) {
+    return cleanGeneralEnvId;
   }
 
   const specificHeaderKey = type === 'projects' ? 'x-projects-spreadsheet-id' : 'x-logs-spreadsheet-id';
   const specificHeaderId = req.headers[specificHeaderKey];
-  if (specificHeaderId && typeof specificHeaderId === 'string' && specificHeaderId.trim() && !isPlaceholder(specificHeaderId)) {
-    return specificHeaderId.trim();
+  if (specificHeaderId && typeof specificHeaderId === 'string') {
+    const cleanSpecificHeaderId = cleanConfigValue(specificHeaderId);
+    if (cleanSpecificHeaderId && !isPlaceholder(cleanSpecificHeaderId)) {
+      return cleanSpecificHeaderId;
+    }
   }
 
   const headerId = req.headers['x-spreadsheet-id'];
-  if (headerId && typeof headerId === 'string' && headerId.trim() && !isPlaceholder(headerId)) {
-    return headerId.trim();
+  if (headerId && typeof headerId === 'string') {
+    const cleanHeaderId = cleanConfigValue(headerId);
+    if (cleanHeaderId && !isPlaceholder(cleanHeaderId)) {
+      return cleanHeaderId;
+    }
   }
 
   return null;
 };
 
 const getProjectsTab = (req: any): string => {
-  if (DIRECT_PROJECTS_SHEET_NAME && DIRECT_PROJECTS_SHEET_NAME.trim()) {
-    return DIRECT_PROJECTS_SHEET_NAME.trim();
+  const cleanTab = cleanConfigValue(DIRECT_PROJECTS_SHEET_NAME);
+  if (cleanTab) {
+    return cleanTab;
   }
-  return (req.headers['x-projects-tab'] as string) || "Projects_Mapping";
+  const headerTab = req.headers['x-projects-tab'];
+  if (headerTab && typeof headerTab === 'string') {
+    return cleanConfigValue(headerTab);
+  }
+  return "Projects_Mapping";
 };
 
 const getSubmissionsTab = (req: any): string => {
-  if (DIRECT_DSR_LOGS_SHEET_NAME && DIRECT_DSR_LOGS_SHEET_NAME.trim()) {
-    return DIRECT_DSR_LOGS_SHEET_NAME.trim();
+  const cleanTab = cleanConfigValue(DIRECT_DSR_LOGS_SHEET_NAME);
+  if (cleanTab) {
+    return cleanTab;
   }
-  return (req.headers['x-submissions-tab'] as string) || "DSR_Logs";
+  const headerTab = req.headers['x-submissions-tab'];
+  if (headerTab && typeof headerTab === 'string') {
+    return cleanConfigValue(headerTab);
+  }
+  return "DSR_Logs";
 };
 
 // Config diagnostics status route

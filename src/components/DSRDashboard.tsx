@@ -1442,7 +1442,7 @@ export default function DSRDashboard({
                     <th className="px-4 py-3 w-28">Priority</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
-                    {isAdmin && <th className="px-4 py-3">Assigned To</th>}
+                    {isAdmin && <th className="px-4 py-3">User</th>}
                     {isAdmin && <th className="px-4 py-3 w-44">Admin Actions</th>}
                   </tr>
                 </thead>
@@ -1588,7 +1588,7 @@ export default function DSRDashboard({
                     <th className="px-4 py-3 text-center">Assigned Frequency</th>
                     <th className="px-4 py-3 text-center">Worked Frequency</th>
                     <th className="px-4 py-3 text-center">Total Times Worked</th>
-                    {isAdmin && <th className="px-4 py-3">Assigned To</th>}
+                    {isAdmin && <th className="px-4 py-3">User</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-150">
@@ -2333,7 +2333,7 @@ export default function DSRDashboard({
                           <th className="px-4 py-3.5 w-16">Sr No.</th>
                           <th className="px-4 py-3.5 w-1/4">Project Name</th>
                           <th className="px-4 py-3.5 w-1/4">Domain</th>
-                          {isAdmin && <th className="px-4 py-3.5 text-left">Assigned To</th>}
+                          {isAdmin && <th className="px-4 py-3.5 text-left">User</th>}
                           {activeColumns.map((col, cIdx) => (
                             <th key={cIdx} className="px-4 py-3.5 text-center font-bold">{col.label}</th>
                           ))}
@@ -2445,7 +2445,7 @@ export default function DSRDashboard({
                       <th className="px-4 py-3">Domain Name</th>
                       <th className="px-4 py-3">Inactivity Duration</th>
                       <th className="px-4 py-3">Last Worked Date</th>
-                      {isAdmin && <th className="px-4 py-3">Assigned To</th>}
+                      {isAdmin && <th className="px-4 py-3">User</th>}
                       {isAdmin && <th className="px-4 py-3 w-28 text-center">Action</th>}
                     </tr>
                   </thead>
