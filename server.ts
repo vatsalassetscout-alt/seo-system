@@ -81,14 +81,35 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
     return null;
   }
 
-  // Check if rawKey is a JSON string of a service account
-  let parsedEmail = email;
-  let parsedKey = rawKey;
+  // Pre-clean rawKey of outer quotes in case the entire env var was wrapped in quotes
+  let cleanedRawKey = rawKey.trim();
+  while ((cleanedRawKey.startsWith('"') && cleanedRawKey.endsWith('"')) || 
+         (cleanedRawKey.startsWith("'") && cleanedRawKey.endsWith("'"))) {
+    cleanedRawKey = cleanedRawKey.substring(1, cleanedRawKey.length - 1).trim();
+  }
 
+  // Try to base64 decode first in case the entire env var was base64 encoded
   try {
-    const trimmedKey = rawKey.trim();
-    if (trimmedKey.startsWith('{') && trimmedKey.endsWith('}')) {
-      const sa = JSON.parse(trimmedKey);
+    const decoded = Buffer.from(cleanedRawKey, 'base64').toString('utf8').trim();
+    if (
+      (decoded.startsWith('{') && decoded.endsWith('}')) ||
+      decoded.includes("-----BEGIN PRIVATE KEY-----") ||
+      decoded.includes("-----BEGIN RSA PRIVATE KEY-----")
+    ) {
+      console.log("ℹ️ Detected base64 encoded service account credentials, successfully decoded.");
+      cleanedRawKey = decoded;
+    }
+  } catch (e) {
+    // Not base64 or failed to decode, continue as-is
+  }
+
+  let parsedEmail = email;
+  let parsedKey = cleanedRawKey;
+
+  // Try parsing as JSON
+  try {
+    if (cleanedRawKey.startsWith('{') && cleanedRawKey.endsWith('}')) {
+      const sa = JSON.parse(cleanedRawKey);
       if (sa.client_email) parsedEmail = sa.client_email;
       if (sa.private_key) parsedKey = sa.private_key;
     }
@@ -96,12 +117,34 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
     console.warn("Attempted to parse service account key as JSON but failed, continuing as raw key format:", e);
   }
 
-  // Clean the email and private key of extra wrapping quotes (e.g. from env vars setup in UI)
+  // Clean the email and private key of extra wrapping quotes
   if (parsedEmail) {
-    parsedEmail = parsedEmail.trim().replace(/^['"]|['"]$/g, '');
+    parsedEmail = parsedEmail.trim();
+    while ((parsedEmail.startsWith('"') && parsedEmail.endsWith('"')) || 
+           (parsedEmail.startsWith("'") && parsedEmail.endsWith("'"))) {
+      parsedEmail = parsedEmail.substring(1, parsedEmail.length - 1).trim();
+    }
   }
   if (parsedKey) {
-    parsedKey = parsedKey.trim().replace(/^['"]|['"]$/g, '');
+    parsedKey = parsedKey.trim();
+    while ((parsedKey.startsWith('"') && parsedKey.endsWith('"')) || 
+           (parsedKey.startsWith("'") && parsedKey.endsWith("'"))) {
+      parsedKey = parsedKey.substring(1, parsedKey.length - 1).trim();
+    }
+  }
+
+  // Try decoding parsedKey as base64 in case only the private key was base64 encoded
+  try {
+    const decodedKey = Buffer.from(parsedKey, 'base64').toString('utf8').trim();
+    if (
+      decodedKey.includes("-----BEGIN PRIVATE KEY-----") ||
+      decodedKey.includes("-----BEGIN RSA PRIVATE KEY-----")
+    ) {
+      console.log("ℹ️ Detected base64 encoded private key, successfully decoded.");
+      parsedKey = decodedKey;
+    }
+  } catch (e) {
+    // Not base64, continue as-is
   }
 
   if (!parsedEmail || !parsedKey || isPlaceholder(parsedEmail) || isPlaceholder(parsedKey)) {
@@ -109,8 +152,47 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
     return null;
   }
 
+  let privateKey = parsedKey;
+
+  // 1. Replace escaped newlines with actual newlines
+  privateKey = privateKey.replace(/\\n/g, '\n');
+  // 2. Replace escaped carriage returns
+  privateKey = privateKey.replace(/\\r/g, '\r');
+  // 3. Remove escaped quotes inside
+  privateKey = privateKey.replace(/\\"/g, '"').replace(/\\'/g, "'");
+  // 4. Clean extra wrapping quotes again after replacing
+  privateKey = privateKey.trim();
+  while ((privateKey.startsWith('"') && privateKey.endsWith('"')) || 
+         (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
+    privateKey = privateKey.substring(1, privateKey.length - 1).trim();
+  }
+
+  // 5. Robust PEM reconstruction to fix spacing/formatting copy-paste errors
+  const headerMatch = privateKey.match(/-----BEGIN[A-Z0-9\s]+PRIVATE KEY-----/);
+  const footerMatch = privateKey.match(/-----END[A-Z0-9\s]+PRIVATE KEY-----/);
+
+  if (headerMatch && footerMatch) {
+    const header = headerMatch[0];
+    const footer = footerMatch[0];
+    
+    const startIndex = privateKey.indexOf(header) + header.length;
+    const endIndex = privateKey.indexOf(footer);
+    let body = privateKey.substring(startIndex, endIndex);
+
+    // Strip out all whitespace/spaces/newlines from the base64-encoded body
+    body = body.replace(/[^A-Za-z0-9+/=]/g, '');
+
+    // Reconstruct beautifully with a clean single-line base64 body (Node.js parses this perfectly)
+    privateKey = `${header}\n${body}\n${footer}`;
+  } else if (!privateKey.includes("-----BEGIN")) {
+    // If it has no header/footer, but has base64 characters, wrap it
+    const cleanedBody = privateKey.replace(/[^A-Za-z0-9+/=]/g, '');
+    if (cleanedBody.length > 100) {
+      privateKey = `-----BEGIN PRIVATE KEY-----\n${cleanedBody}\n-----END PRIVATE KEY-----`;
+    }
+  }
+
   try {
-    const privateKey = parsedKey.replace(/\\n/g, '\n');
     const jwt = new JWT({
       email: parsedEmail,
       key: privateKey,
@@ -121,6 +203,15 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
     return tokenRes.token || null;
   } catch (err) {
     console.error("❌ Failed to authenticate Google Service Account JWT client:", err);
+    console.log("🔍 Safe Google JWT Diagnostics:");
+    console.log(`  - Service Account Email: "${parsedEmail}" (length: ${parsedEmail?.length || 0})`);
+    console.log(`  - Raw Key Input Length: ${rawKey?.length || 0}`);
+    console.log(`  - Cleaned Key Input Length: ${cleanedRawKey?.length || 0}`);
+    console.log(`  - Final Parsed Key Length: ${parsedKey?.length || 0}`);
+    console.log(`  - Final Processed Key Length: ${privateKey?.length || 0}`);
+    console.log(`  - Starts with valid PEM header: ${privateKey.includes("-----BEGIN PRIVATE KEY-----") || privateKey.includes("-----BEGIN RSA PRIVATE KEY-----")}`);
+    console.log(`  - Ends with valid PEM footer: ${privateKey.includes("-----END PRIVATE KEY-----") || privateKey.includes("-----END RSA PRIVATE KEY-----")}`);
+    console.log(`  - Newline character count in processed key: ${(privateKey.match(/\n/g) || []).length}`);
     return null;
   }
 };
