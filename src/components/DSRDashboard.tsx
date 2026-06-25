@@ -5,7 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { DSREntry, Project, AppUser, ProjectLocation, CustomSubmissionType } from '../types';
-import { getUserDisplayName } from '../lib/userUtils';
+import { getUserDisplayName, isUserAdmin } from '../lib/userUtils';
 import { 
   Calendar, 
   ClipboardCheck, 
@@ -158,23 +158,15 @@ export default function DSRDashboard({
   // Unique list of all available user accounts for checklist selection (excluding admins)
   const allUsersList = useMemo(() => {
     const emailMap = new Map<string, string>();
-    const isUserAdmin = (email: string) => {
-      const emailLower = email.trim().toLowerCase();
-      if (emailLower === '8888' || emailLower.includes("admin")) return true;
-      if (adminEmails && adminEmails.some(a => a.trim().toLowerCase() === emailLower)) return true;
-      const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
-      if (hardcodedAdmins.some((a) => a.trim().toLowerCase() === emailLower)) return true;
-      return false;
-    };
 
     allowedUsers.forEach(u => {
-      if (u.email && u.email.trim() && !isUserAdmin(u.email)) {
+      if (u.email && u.email.trim() && !isUserAdmin(u.email, adminEmails)) {
         emailMap.set(u.email.trim().toLowerCase(), u.name || getUserDisplayName(u.email, allowedUsers));
       }
     });
 
     entries.forEach(entry => {
-      if (entry && entry.userEmail && !isUserAdmin(entry.userEmail)) {
+      if (entry && entry.userEmail && !isUserAdmin(entry.userEmail, adminEmails)) {
         const email = entry.userEmail.trim().toLowerCase();
         if (!emailMap.has(email)) {
           emailMap.set(email, getUserDisplayName(email, allowedUsers));
@@ -182,10 +174,27 @@ export default function DSRDashboard({
       }
     });
 
-    return Array.from(emailMap.entries()).map(([email, name]) => ({
-      email,
-      name
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    const nameToUserObj = new Map<string, { name: string; emails: string[] }>();
+    emailMap.forEach((name, email) => {
+      const displayName = name || getUserDisplayName(email, allowedUsers);
+      if (displayName && displayName !== 'Admin') {
+        const trimmedName = displayName.trim();
+        const lowerName = trimmedName.toLowerCase();
+        if (nameToUserObj.has(lowerName)) {
+          const existing = nameToUserObj.get(lowerName)!;
+          if (!existing.emails.includes(email)) {
+            existing.emails.push(email);
+          }
+        } else {
+          nameToUserObj.set(lowerName, {
+            name: trimmedName,
+            emails: [email]
+          });
+        }
+      }
+    });
+
+    return Array.from(nameToUserObj.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [allowedUsers, entries, adminEmails]);
 
   // User Projects based on logged-in user or admin's selected users filter
@@ -738,29 +747,60 @@ export default function DSRDashboard({
     return 30; // default to monthly view scale if no items exist
   }, [dateFilterType, customStartDate, customEndDate, filteredWorks]);
 
-  // Compute assigned users historically (whoever logged work on this project)
+  // Compute assigned users from the Sheet (or fallback to historical who worked on it)
   const getAssignedUsersForProject = (projectId: string) => {
-    const emails = new Set<string>();
-    entries.forEach(entry => {
-      if (entry.works && entry.works.some(w => w.projectId === projectId)) {
-        if (entry.userEmail) {
-          emails.add(entry.userEmail.toLowerCase().trim());
+    const project = projects.find(p => p.id === projectId);
+    const usersList: string[] = [];
+
+    if (project) {
+      if (project.users && Array.isArray(project.users) && project.users.length > 0) {
+        project.users.forEach(u => {
+          const cleaned = u.trim().toLowerCase();
+          if (cleaned) {
+            const mappedName = employeeEmailToNameMap[cleaned];
+            usersList.push(mappedName || u);
+          }
+        });
+      } else if (project.userId) {
+        const cleaned = project.userId.trim().toLowerCase();
+        if (cleaned) {
+          const mappedName = employeeEmailToNameMap[cleaned];
+          usersList.push(mappedName || project.userId);
         }
       }
-    });
-    
-    if (emails.size === 0) {
-      return 'Unassigned';
     }
-    
-    return Array.from(emails)
-      .map(email => employeeEmailToNameMap[email] || email)
-      .join(', ');
+
+    // If still empty, fall back to historical loggers so we don't lose information for unmapped projects
+    if (usersList.length === 0) {
+      const historicalEmails = new Set<string>();
+      entries.forEach(entry => {
+        if (entry.works && entry.works.some(w => w.projectId === projectId)) {
+          if (entry.userEmail) {
+            historicalEmails.add(entry.userEmail.toLowerCase().trim());
+          }
+        }
+      });
+      historicalEmails.forEach(email => {
+        usersList.push(employeeEmailToNameMap[email] || email);
+      });
+    }
+
+    // Capitalize user names nicely if they are raw email user parts
+    const formattedUsers = usersList.map(u => {
+      if (u.includes('@')) {
+        const parts = u.split('@')[0];
+        return parts.charAt(0).toUpperCase() + parts.slice(1);
+      }
+      return u;
+    });
+
+    const uniqueUsers = Array.from(new Set(formattedUsers));
+    return uniqueUsers.join(', ');
   };
 
   // Tab 2: Frequency metric breakdown
   const frequencyData = useMemo(() => {
-    return filteredProjectsForMetrics.map((p, idx) => {
+    const list = filteredProjectsForMetrics.map((p) => {
       const pWorks = filteredWorks.filter(w => w.projectId === p.id);
       const timesWorked = pWorks.length;
 
@@ -770,10 +810,18 @@ export default function DSRDashboard({
         code: p.code,
         domain: p.domain,
         assignedFrequency: p.frequency,
-        timesWorked,
-        srNo: idx + 1
+        timesWorked
       };
-    }).sort((a, b) => b.timesWorked - a.timesWorked);
+    });
+
+    // Sort by timesWorked descending
+    list.sort((a, b) => b.timesWorked - a.timesWorked);
+
+    // Map srNo sequentially
+    return list.map((item, idx) => ({
+      ...item,
+      srNo: idx + 1
+    }));
   }, [filteredProjectsForMetrics, filteredWorks]);
 
   // Tab 3: Team performance computed scoreboard
@@ -998,17 +1046,14 @@ export default function DSRDashboard({
       {/* Workspace Filters panel - ON TOP OF PAGE */}
       <div className="bg-white p-5 rounded-2xl border border-gray-150 shadow-2xs space-y-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Building2 className="text-indigo-600 shrink-0" size={14} />
-            <span className="text-xs font-black text-gray-900 uppercase tracking-wider">Workspace Filters</span>
-          </div>
+          <div />
           {(selectedProjectIds.length > 0 || selectedUsers.length > 0 || regionFilter !== 'All' || selectedLocations.length > 0 || dateFilterType !== 'all' || commonSearchTerm !== '') && (
             <button
               onClick={handleResetFilters}
               className="text-[10px] font-bold text-indigo-600 hover:text-indigo-850 flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg transition-all"
             >
               <X size={11} className="shrink-0" />
-              Reset Workspace Filters
+              Reset Filters
             </button>
           )}
         </div>
@@ -1107,11 +1152,11 @@ export default function DSRDashboard({
             </div>
           </div>
 
-          {/* Block 3: Project Allocation with multi-select list and local search */}
+          {/* Block 3: Project with multi-select list and local search */}
           <div className="flex flex-col gap-1.5 bg-slate-50/40 p-2.5 rounded-xl border border-gray-100">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1 leading-none">
               <Tag size={11} className="text-gray-400" />
-              Project Allocation
+              Project
             </span>
             <div className="relative">
               <button
@@ -1342,7 +1387,7 @@ export default function DSRDashboard({
                           <span>•</span>
                           <button 
                             type="button" 
-                            onClick={(e) => { e.stopPropagation(); setSelectedUsers(allUsersList.map(u => u.email)); }} 
+                            onClick={(e) => { e.stopPropagation(); setSelectedUsers(allUsersList.flatMap(u => u.emails)); }} 
                             className="text-indigo-600 hover:text-indigo-850"
                           >
                             All
@@ -1363,20 +1408,26 @@ export default function DSRDashboard({
 
                       <div className="space-y-0.5 max-h-36 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         {allUsersList
-                          .filter(u => u.name.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(userSearchTerm.toLowerCase()))
+                          .filter(u => u.name.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.emails.some(email => email.toLowerCase().includes(userSearchTerm.toLowerCase())))
                           .map((u) => {
-                            const isChecked = selectedUsers.includes(u.email);
+                            const isChecked = u.emails.every(email => selectedUsers.includes(email));
                             return (
-                              <div key={u.email} className="flex items-center justify-between p-1 rounded hover:bg-gray-50 transition-colors">
+                              <div key={u.name} className="flex items-center justify-between p-1 rounded hover:bg-gray-50 transition-colors">
                                 <label className="flex items-center gap-2 cursor-pointer text-[11px] text-gray-800 font-bold grow select-none">
                                   <input
                                     type="checkbox"
                                     checked={isChecked}
                                     onChange={() => {
                                       if (isChecked) {
-                                        setSelectedUsers(selectedUsers.filter(em => em !== u.email));
+                                        setSelectedUsers(selectedUsers.filter(em => !u.emails.includes(em)));
                                       } else {
-                                        setSelectedUsers([...selectedUsers, u.email]);
+                                        const newSelections = [...selectedUsers];
+                                        u.emails.forEach(email => {
+                                          if (!newSelections.includes(email)) {
+                                            newSelections.push(email);
+                                          }
+                                        });
+                                        setSelectedUsers(newSelections);
                                       }
                                     }}
                                     className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
@@ -1427,11 +1478,11 @@ export default function DSRDashboard({
           <div>
             <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Live Projects Worklist</h3>
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Table</h3>
 
               </div>
-              <div className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">
-                Sorted by priority (P1 first)
+              <div className="text-[10px] font-extrabold bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-xl border border-indigo-150 font-mono">
+                Total Projects: {projectTableData.length}
               </div>
             </div>
 
@@ -1441,144 +1492,99 @@ export default function DSRDashboard({
                   <tr>
                     <th className="px-4 py-3 w-14">Sr No.</th>
                     <th className="px-4 py-3">Project Name</th>
+                    <th className="px-4 py-3">Domain</th>
                     <th className="px-4 py-3 w-28">Priority</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
-                    {isAdmin && <th className="px-4 py-3">User</th>}
+                    <th className="px-4 py-3">User</th>
                     {isAdmin && <th className="px-4 py-3 w-44">Admin Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-150">
                   {projectTableData.map((item) => {
-                    const isExpanded = !!expandedProjectStats[item.id];
                     return (
-                      <React.Fragment key={item.id}>
-                        {/* Main row */}
-                        <tr 
-                          onClick={() => toggleProjectStats(item.id)}
-                          className="hover:bg-slate-50/60 transition-colors cursor-pointer select-none"
-                        >
-                          <td className="px-4 py-3 font-mono font-bold text-gray-400">{item.srNo}</td>
+                      <tr 
+                        key={item.id}
+                        className="hover:bg-slate-50/60 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono font-bold text-gray-400">{item.srNo}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900">{item.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-gray-600">
+                          {item.domain ? (
+                            <a 
+                              href={item.domain.startsWith('http') ? item.domain : `https://${item.domain}`} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="text-indigo-600 hover:underline font-bold"
+                            >
+                              {item.domain}
+                            </a>
+                          ) : (
+                            <span className="text-gray-400 italic">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.priority === 'P1' && (
+                            <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded border border-red-100 uppercase tracking-wider">
+                              🚨 P1 High
+                            </span>
+                          )}
+                          {item.priority === 'P2' && (
+                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wider">
+                              ⚡ P2 Med
+                            </span>
+                          )}
+                          {item.priority === 'P3' && (
+                            <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
+                              🟢 P3 Low
+                            </span>
+                          )}
+                          {!['P1', 'P2', 'P3'].includes(item.priority || '') && (
+                            <span className="text-[10px] font-bold text-gray-400 italic">
+                              — none —
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center font-mono font-bold text-gray-700">
+                          {item.timesWorked}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-[11px] font-semibold text-gray-600">
+                            {item.lastWorked}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
+                            {getAssignedUsersForProject(item.id)}
+                          </span>
+                        </td>
+                        {isAdmin && (
                           <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-gray-900">{item.name}</span>
-                              <ChevronDown 
-                                size={14} 
-                                className={`text-gray-400 transition-transform ${
-                                  isExpanded ? 'rotate-180 text-indigo-600 font-black' : ''
-                                }`} 
-                              />
+                            <div className="flex items-center gap-1.5">
+                              <select
+                                value={item.priority || ''}
+                                onChange={(e) => {
+                                  const pVal = e.target.value;
+                                  const orig = projects.find(pr => pr.id === item.id);
+                                  if (orig && onUpdateProject) {
+                                    onUpdateProject({ ...orig, priority: pVal });
+                                  }
+                                }}
+                                className="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-gray-200 rounded text-gray-800 cursor-pointer focus:outline-none"
+                              >
+                                <option value="">- Priority -</option>
+                                <option value="P1">P1</option>
+                                <option value="P2">P2</option>
+                                <option value="P3">P3</option>
+                              </select>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
-                            {item.priority === 'P1' && (
-                              <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded border border-red-100 uppercase tracking-wider">
-                                🚨 P1 High
-                              </span>
-                            )}
-                            {item.priority === 'P2' && (
-                              <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wider">
-                                ⚡ P2 Med
-                              </span>
-                            )}
-                            {item.priority === 'P3' && (
-                              <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
-                                🟢 P3 Low
-                              </span>
-                            )}
-                            {!['P1', 'P2', 'P3'].includes(item.priority || '') && (
-                              <span className="text-[10px] font-bold text-gray-400 italic">
-                                — none —
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center font-mono font-bold text-gray-700">
-                            {item.timesWorked}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-[11px] font-semibold text-gray-600">
-                              {item.lastWorked}
-                            </span>
-                          </td>
-                          {isAdmin && (
-                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                              <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
-                                {getAssignedUsersForProject(item.id)}
-                              </span>
-                            </td>
-                          )}
-                          {isAdmin && (
-                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center gap-1.5">
-                                <select
-                                  value={item.priority || ''}
-                                  onChange={(e) => {
-                                    const pVal = e.target.value;
-                                    const orig = projects.find(pr => pr.id === item.id);
-                                    if (orig && onUpdateProject) {
-                                      onUpdateProject({ ...orig, priority: pVal });
-                                    }
-                                  }}
-                                  className="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-gray-200 rounded text-gray-800 cursor-pointer focus:outline-none"
-                                >
-                                  <option value="">- Priority -</option>
-                                  <option value="P1">P1</option>
-                                  <option value="P2">P2</option>
-                                  <option value="P3">P3</option>
-                                </select>
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-
-                        {/* Collapsible Dropdown Row with Domain & Keywords */}
-                        {isExpanded && (
-                          <tr className="bg-slate-50/50">
-                            <td colSpan={isAdmin ? 7 : 5} className="px-6 py-4 border-t border-b border-gray-150">
-                              <div className="space-y-4 text-left">
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-b border-gray-150/40 pb-3">
-                                  <div className="flex items-center gap-1.5 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
-                                    <span>🌐 Domain:</span>
-                                  </div>
-                                  {item.domain ? (
-                                    <a 
-                                      href={item.domain.startsWith('http') ? item.domain : `https://${item.domain}`} 
-                                      target="_blank" 
-                                      rel="noreferrer" 
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="font-mono text-indigo-600 hover:underline text-xs font-bold bg-white border border-gray-200 px-3 py-1 rounded-xl shadow-3xs inline-flex items-center gap-1.5"
-                                    >
-                                      {item.domain}
-                                    </a>
-                                  ) : (
-                                    <span className="text-gray-400 italic text-xs">No Domain Registered</span>
-                                  )}
-                                </div>
-                                
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-1.5 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
-                                    <span>🎯 Target SEO Keywords / Rankings:</span>
-                                  </div>
-                                  {Array.isArray(item.keywords) && item.keywords.length > 0 ? (
-                                    <div className="flex flex-wrap gap-2">
-                                      {item.keywords.map((kw: string) => (
-                                        <span 
-                                          key={kw} 
-                                          className="inline-flex items-center bg-amber-50 text-amber-900 border border-amber-200/50 rounded-xl px-2.5 py-1 text-xs font-extrabold font-mono shadow-3xs"
-                                        >
-                                          {kw}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-400 italic text-xs block">No keywords registered for this project.</span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
                         )}
-                      </React.Fragment>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -1591,7 +1597,7 @@ export default function DSRDashboard({
           <div>
             <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Report Frequency Index</h3>
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Frequency</h3>
 
               </div>
 
@@ -2462,10 +2468,7 @@ export default function DSRDashboard({
           <div>
             <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Unworked/Neglected Projects</h3>
-                <span className="text-[10px] text-gray-400 font-bold uppercase mt-1 block">
-                  Campaign allocations with no registered updates
-                </span>
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Unworked Projects</h3>
               </div>
               
               <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
@@ -2616,9 +2619,6 @@ export default function DSRDashboard({
             <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Ranking Section</h3>
-                <span className="text-[10px] text-gray-400 font-bold uppercase mt-1 block">
-                  Organic SEO keyword ranking performance and daily logged operations
-                </span>
               </div>
               
               <div className="relative w-full sm:w-64">
@@ -2646,6 +2646,8 @@ export default function DSRDashboard({
                     <tr>
                       <th className="px-4 py-3 w-14 text-center">Sr No.</th>
                       <th className="px-4 py-3">Project Name</th>
+                      <th className="px-4 py-3">User</th>
+                      <th className="px-4 py-3 text-center w-36">Total Keywords</th>
                       <th className="px-4 py-3 w-48">Last Check</th>
                     </tr>
                   </thead>
@@ -2679,6 +2681,20 @@ export default function DSRDashboard({
                               </div>
                             </td>
 
+                            {/* User column */}
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
+                                {getAssignedUsersForProject(proj.id)}
+                              </span>
+                            </td>
+
+                            {/* Total Keywords */}
+                            <td className="px-4 py-3.5 text-center font-mono font-bold text-gray-750">
+                              <span className="inline-flex items-center justify-center font-bold px-2.5 py-0.5 rounded-full text-[10px] h-5 min-w-5 bg-amber-50 text-amber-800 border border-amber-200">
+                                {Array.isArray(proj.keywords) ? proj.keywords.length : 0}
+                              </span>
+                            </td>
+
                             {/* Last Check (Last Worked Date) */}
                             <td className="px-4 py-3.5">
                               {(() => {
@@ -2703,7 +2719,7 @@ export default function DSRDashboard({
                           {/* Sub-table Dropdown for Keywords of this project */}
                           {isExpanded && (
                             <tr className="bg-slate-50/50">
-                              <td colSpan={3} className="px-6 py-4 border-t border-b border-gray-150">
+                              <td colSpan={5} className="px-6 py-4 border-t border-b border-gray-150">
                                 <div className="space-y-2">
                                   <div className="text-[10px] uppercase font-black text-gray-450 tracking-wider">
                                     Keyword Rankings &amp; Search Visibility Details

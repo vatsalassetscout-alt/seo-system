@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Project, CustomSubmissionType, DSREntry, AppUser, ProjectLocation } from '../types';
+import { getUserDisplayName, isUserAdmin } from '../lib/userUtils';
 import {
   Plus,
   Trash2,
@@ -280,22 +281,10 @@ export default function DSRSettings({
                 <div className="space-y-4">
                   <div className="flex flex-col gap-1">
                     {(() => {
-                      const isUserAdmin = (email: string): boolean => {
-                        if (!email) return false;
-                        const emailLower = email.trim().toLowerCase();
-                        if (emailLower === '8888' || emailLower.includes("admin")) return true;
-                        if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
-                        const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
-                        if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
-                        return false;
-                      };
-                      const activeUsers = allowedUsers.filter(u => !isUserAdmin(u.email));
+                      const activeUsers = allowedUsers.filter(u => !isUserAdmin(u.email, adminEmails));
                       return (
                         <>
                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Logged-In System Users ({activeUsers.length})</span>
-                          <span className="text-[10px] text-gray-500 font-semibold pl-0.5">
-                            Note: Only authorized users registered here are allowed to log into the system. You can update names or revoke access at any time.
-                          </span>
                         </>
                       );
                     })()}
@@ -308,52 +297,30 @@ export default function DSRSettings({
                           <th className="py-3 px-4 text-left">Employee Name</th>
                           <th className="py-3 px-4 text-left">User ID</th>
                           <th className="py-3 px-4 text-center">Last Logged In</th>
-                          <th className="py-3 px-4 text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-105">
                         {(() => {
-                          const isUserAdmin = (email: string): boolean => {
-                            if (!email) return false;
-                            const emailLower = email.trim().toLowerCase();
-                            if (emailLower === '8888' || emailLower.includes("admin")) return true;
-                            if (adminEmails && adminEmails.some(adm => adm.toLowerCase() === emailLower)) return true;
-                            const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
-                            if (hardcodedAdmins.some(adm => adm.toLowerCase() === emailLower)) return true;
-                            return false;
-                          };
-                          return allowedUsers.filter(u => !isUserAdmin(u.email)).map((u) => {
+                          const activeUsers = allowedUsers.filter(u => !isUserAdmin(u.email, adminEmails));
+                          // Deduplicate by name to prevent repeated names
+                          const uniqueMap = new Map<string, typeof activeUsers[0]>();
+                          activeUsers.forEach(u => {
+                            const name = getUserDisplayName(u.email, allowedUsers);
+                            if (name && name !== 'Admin') {
+                              uniqueMap.set(name.toLowerCase().trim(), u);
+                            }
+                          });
+
+                          return Array.from(uniqueMap.values()).map((u) => {
                             return (
                               <tr key={u.email} className="hover:bg-slate-50/45 transition text-xs">
                                 <td className="py-2 px-4 font-extrabold text-gray-900">
-                                  <input
-                                    type="text"
-                                    value={u.name}
-                                    onChange={(e) => {
-                                      const nextName = e.target.value;
-                                      onSetAllowedUsers(prev => prev.map(item => item.email.toLowerCase() === u.email.toLowerCase() ? { ...item, name: nextName } : item));
-                                    }}
-                                    className="px-2 py-1.5 border border-gray-200/50 hover:border-indigo-300 focus:border-indigo-500 rounded bg-gray-50/20 focus:bg-white text-xs font-bold w-full transition outline-none"
-                                    placeholder="Assign Name..."
-                                  />
+                                  <span className="font-extrabold text-gray-900 px-2 py-1.5 inline-block">
+                                    {getUserDisplayName(u.email, allowedUsers)}
+                                  </span>
                                 </td>
                                 <td className="py-3.5 px-4 font-mono font-semibold text-gray-500">{u.email}</td>
                                 <td className="py-3.5 px-4 text-center font-mono text-xs font-semibold text-gray-500">{u.lastLoggedIn || 'Never'}</td>
-                                <td className="py-3.5 px-4 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (window.confirm(`Revoke Work Log system access and delete identity mapping for: ${u.name}?`)) {
-                                        onSetAllowedUsers(prev => prev.filter(item => item.email.toLowerCase() !== u.email.toLowerCase()));
-                                        triggerAlert('success', `Revoked access for ${u.name}`);
-                                      }
-                                    }}
-                                    className="p-1 hover:bg-rose-50 text-gray-400 hover:text-rose-500 rounded transition cursor-pointer"
-                                    title="Revoke User"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                </td>
                               </tr>
                             );
                           });
@@ -381,19 +348,13 @@ export default function DSRSettings({
             <div className="border-b border-gray-100 pb-4">
               <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
                 <Lock size={16} className="text-indigo-600" />
-                Assign Work Domain to Reporter
+                Assign Work
               </h4>
-              <p className="text-xs text-gray-450">
-                Create a targeted alert requesting an employee to fill task logs on a specific project for a selected date. The notification remains sticky until they submit!
-              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {/* Form: Assign Project */}
               <div className="md:col-span-1 bg-slate-50/50 p-6 rounded-2xl border border-gray-150 h-fit space-y-4">
-                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide">
-                  Create Assignment
-                </h5>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -425,14 +386,13 @@ export default function DSRSettings({
                     };
 
                     onAddAlert(payload);
-                    triggerAlert('success', `Direct task request dispatched for ${email} on date ${date}!`);
+                    triggerAlert('success', `Direct task request dispatched for ${getUserDisplayName(email, allowedUsers)} on date ${date}!`);
                     form.reset();
                     setSelectedUserEmail('');
                   }}
                   className="space-y-4"
                 >
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Reporter User ID</label>
                     <select
                       name="userEmail"
                       required
@@ -440,15 +400,26 @@ export default function DSRSettings({
                       onChange={(e) => setSelectedUserEmail(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
                     >
-                      <option value="">- Select Human Reporter -</option>
-                      {allowedUsers.map(u => (
-                        <option key={u.email} value={u.email}>{u.name} (ID: {u.email})</option>
-                      ))}
+                      <option value="">- Select User -</option>
+                      {(() => {
+                        const filtered = allowedUsers.filter(u => u.email && !isUserAdmin(u.email, adminEmails));
+                        const uniqueMap = new Map<string, typeof filtered[0]>();
+                        filtered.forEach(u => {
+                          const displayName = getUserDisplayName(u.email, allowedUsers);
+                          if (displayName && displayName !== 'Admin') {
+                            uniqueMap.set(displayName.toLowerCase().trim(), u);
+                          }
+                        });
+                        return Array.from(uniqueMap.values()).map(u => (
+                          <option key={u.email} value={u.email}>
+                            {getUserDisplayName(u.email, allowedUsers)}
+                          </option>
+                        ));
+                      })()}
                     </select>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Project Domain</label>
                     <select
                       name="projectId"
                       required
@@ -465,14 +436,13 @@ export default function DSRSettings({
                             })
                           : projects;
                         return filtered.map(p => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.domain || 'no domain'})</option>
+                          <option key={p.id} value={p.id}>{p.name}</option>
                         ));
                       })()}
                     </select>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Target Date</label>
                     <input
                       type="date"
                       name="date"
@@ -512,8 +482,8 @@ export default function DSRSettings({
                       <thead className="bg-gray-50/70 border-b border-gray-150 font-bold text-gray-500 text-[10px] uppercase">
                         <tr>
                           <th className="px-4 py-3">Reporter</th>
-                          <th className="px-4 py-3">Project Domain</th>
-                          <th className="px-4 py-3">Target Date</th>
+                          <th className="px-4 py-3">Project</th>
+                          <th className="px-4 py-3">Date</th>
                           <th className="px-4 py-3">Logged?</th>
                           <th className="px-4 py-3 text-center">Status</th>
                         </tr>
@@ -545,12 +515,11 @@ export default function DSRSettings({
                             return (
                               <tr key={asg.id} className="hover:bg-slate-50/40">
                                 <td className="px-4 py-3.5">
-                                  <div className="font-bold text-gray-900">{userRecord?.name || asg.userEmail}</div>
+                                  <div className="font-bold text-gray-900">{getUserDisplayName(asg.userEmail, allowedUsers)}</div>
                                   <div className="text-[10px] text-gray-400 font-mono">{asg.userEmail}</div>
                                 </td>
                                 <td className="px-4 py-3.5">
                                   <div className="font-bold text-gray-800">{asg.projectName || 'Project'}</div>
-                                  <div className="text-[10px] font-mono text-indigo-600 font-bold">{asg.projectDomain}</div>
                                 </td>
                                 <td className="px-4 py-3.5 font-mono text-gray-600 font-semibold">
                                   {asg.date}

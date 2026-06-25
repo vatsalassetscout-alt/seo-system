@@ -64,9 +64,10 @@ const mapUsersFromProjects = (projectsList: any[]): AppUser[] => {
   // Hardcode defaults as backup if any of the specified users are not mapped yet
   const idsMap = [
     { id: "1859", name: "Pratap More" }, // Default fallback if no sheet mapping is present yet
-    { id: "9531", name: "User 9531" },
-    { id: "5595", name: "User 5595" },
-    { id: "4001", name: "User 4001" },
+    { id: "9531", name: "Rushikesh Pote" },
+    { id: "5595", name: "Kavita Patel" },
+    { id: "4001", name: "Vatsal Patel" },
+    { id: "8888", name: "Vatsal Patel" }
   ];
   idsMap.forEach(({ id, name }) => {
     if (!usersMap.has(id)) {
@@ -74,10 +75,17 @@ const mapUsersFromProjects = (projectsList: any[]): AppUser[] => {
     }
   });
 
-  return Array.from(usersMap.entries()).map(([userId, name]) => ({
-    email: userId,
-    name: name
-  }));
+  return Array.from(usersMap.entries()).map(([userId, name]) => {
+    let finalName = name;
+    const resolved = getUserDisplayName(userId, []);
+    if (resolved && !resolved.startsWith("User ")) {
+      finalName = resolved;
+    }
+    return {
+      email: userId,
+      name: finalName
+    };
+  });
 };
 
 export default function App() {
@@ -779,8 +787,7 @@ export default function App() {
           ));
         }
 
-        const matched = allowedUsers.find((u) => u.email.trim().toLowerCase() === userEmail);
-        const resolvedName = matched ? matched.name : (result.user.displayName || getUserDisplayName(userEmail, allowedUsers));
+        const resolvedName = getUserDisplayName(userEmail, allowedUsers) || result.user.displayName || userEmail;
 
         registerLoggedInUser(userEmail, resolvedName);
         setCurrentUserEmail(userEmail);
@@ -1196,7 +1203,7 @@ export default function App() {
                 )}
                 <div className="overflow-hidden leading-none text-left">
                   <span className="block font-bold text-gray-800 truncate" title={currentUserEmail || ''}>
-                    {getUserDisplayName(currentUserEmail, allowedUsers)}
+                    {isAdmin ? 'ADMIN' : getUserDisplayName(currentUserEmail, allowedUsers)}
                   </span>
                   <span className="text-[9px] text-gray-400 font-mono mt-0.5 block uppercase tracking-wider">
                     {isAdmin ? 'Administrator' : 'Reporter Profile'}

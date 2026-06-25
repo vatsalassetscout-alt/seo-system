@@ -5,7 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { DSREntry, Project, ProjectWork, CustomSubmissionType, AppUser } from '../types';
-import { getUserDisplayName } from '../lib/userUtils';
+import { getUserDisplayName, isUserAdmin } from '../lib/userUtils';
 import {
   Search,
   Calendar,
@@ -110,14 +110,6 @@ export default function DSRLogs({
   // Host list of all users on the system (both allowed list and historic logging addresses)
   const allUsersList = useMemo(() => {
     const emailMap = new Map<string, string>();
-    const isUserAdmin = (email: string): boolean => {
-      if (!email) return false;
-      const emailLower = email.trim().toLowerCase();
-      if (emailLower === '8888' || emailLower.includes('admin')) return true;
-      const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
-      if (hardcodedAdmins.some((a) => a.toLowerCase() === emailLower)) return true;
-      return false;
-    };
 
     allowedUsers.forEach(u => {
       if (u.email && u.email.trim() && !isUserAdmin(u.email)) {
@@ -134,10 +126,16 @@ export default function DSRLogs({
       }
     });
 
-    return Array.from(emailMap.entries()).map(([email, name]) => ({
-      email,
-      name
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    // Deduplicate by display name to prevent repeated names
+    const uniqueMap = new Map<string, { email: string; name: string }>();
+    emailMap.forEach((name, email) => {
+      const displayName = name || getUserDisplayName(email, allowedUsers);
+      if (displayName && displayName !== 'Admin') {
+        uniqueMap.set(displayName.toLowerCase().trim(), { email, name: displayName });
+      }
+    });
+
+    return Array.from(uniqueMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [allowedUsers, entries]);
 
   const employeeNamesMap = useMemo(() => {

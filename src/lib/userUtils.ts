@@ -44,12 +44,26 @@ export const registerNamesFromProjects = (projects: any[]): void => {
   });
 };
 
+export const isUserAdmin = (email: string | null | undefined, adminEmails: string[] = []): boolean => {
+  if (!email) return false;
+  const emailLower = email.trim().toLowerCase();
+  if (emailLower === '8888' || emailLower === 'admin' || emailLower.includes("admin")) return true;
+  if (adminEmails && adminEmails.some(a => a.trim().toLowerCase() === emailLower)) return true;
+  const hardcodedAdmins = ['vatsalpatelwork20@gmail.com', 'assetscout007rohan@gmail.com'];
+  if (hardcodedAdmins.some((a) => a.trim().toLowerCase() === emailLower)) return true;
+  return false;
+};
+
 /**
  * Resolves a user ID or email address to a formatted display name.
  */
-export const getUserDisplayName = (email: string | null | undefined, allowedUsers: AppUser[] = []): string => {
+export const getUserDisplayName = (email: string | null | undefined, allowedUsers: AppUser[] = [], adminEmails: string[] = []): string => {
   if (!email) return '';
   const val = email.trim().toLowerCase();
+
+  if (isUserAdmin(val, adminEmails)) {
+    return 'Admin';
+  }
 
   if (USER_NAMES_DICT[val]) {
     return USER_NAMES_DICT[val];
@@ -61,6 +75,13 @@ export const getUserDisplayName = (email: string | null | undefined, allowedUser
     return USER_NAMES_DICT[prefix];
   }
 
+  // Smart partial name matching for USER_NAMES_DICT (e.g. "rushikesh" maps to "Rushikesh Pote")
+  const dictKeys = Object.keys(USER_NAMES_DICT);
+  const foundPartialKey = dictKeys.find(k => k === val || k.split(' ').includes(val));
+  if (foundPartialKey) {
+    return USER_NAMES_DICT[foundPartialKey];
+  }
+
   // Find in allowedUsers and prefer non-generic placeholder name
   const matched = allowedUsers.find((u) => u.email.trim().toLowerCase() === val);
   if (matched && matched.name && matched.name.trim() && !/^User\s+\d+$/i.test(matched.name.trim())) {
@@ -69,7 +90,7 @@ export const getUserDisplayName = (email: string | null | undefined, allowedUser
 
   // Check if purely numeric
   if (/^\d+$/.test(val)) {
-    if (val === '8888') return 'Vatsal Patel';
+    if (val === '8888') return 'Admin';
     if (matched && matched.name && matched.name.trim()) {
       return matched.name;
     }
