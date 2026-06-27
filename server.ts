@@ -72,12 +72,15 @@ const isPlaceholder = (val: string | undefined): boolean => {
   );
 };
 
+let lastGoogleAuthError: string | null = null;
+
 const getGoogleAccessToken = async (): Promise<string | null> => {
   let email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
   let rawKey = process.env.GOOGLE_PRIVATE_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
   if (!rawKey) {
     console.log("⚠️ No service account key found in environment variable GOOGLE_PRIVATE_KEY.");
+    lastGoogleAuthError = "No service account key found in environment variable GOOGLE_PRIVATE_KEY.";
     return null;
   }
 
@@ -200,18 +203,13 @@ const getGoogleAccessToken = async (): Promise<string | null> => {
     });
 
     const tokenRes = await jwt.getAccessToken();
+    if (tokenRes.token) {
+      lastGoogleAuthError = null;
+    }
     return tokenRes.token || null;
-  } catch (err) {
-    console.error("❌ Failed to authenticate Google Service Account JWT client:", err);
-    console.log("🔍 Safe Google JWT Diagnostics:");
-    console.log(`  - Service Account Email: "${parsedEmail}" (length: ${parsedEmail?.length || 0})`);
-    console.log(`  - Raw Key Input Length: ${rawKey?.length || 0}`);
-    console.log(`  - Cleaned Key Input Length: ${cleanedRawKey?.length || 0}`);
-    console.log(`  - Final Parsed Key Length: ${parsedKey?.length || 0}`);
-    console.log(`  - Final Processed Key Length: ${privateKey?.length || 0}`);
-    console.log(`  - Starts with valid PEM header: ${privateKey.includes("-----BEGIN PRIVATE KEY-----") || privateKey.includes("-----BEGIN RSA PRIVATE KEY-----")}`);
-    console.log(`  - Ends with valid PEM footer: ${privateKey.includes("-----END PRIVATE KEY-----") || privateKey.includes("-----END RSA PRIVATE KEY-----")}`);
-    console.log(`  - Newline character count in processed key: ${(privateKey.match(/\n/g) || []).length}`);
+  } catch (err: any) {
+    lastGoogleAuthError = err?.message || String(err);
+    console.log("⚠️ Google Service Account JWT authentication info: Key is inactive or invalid on GCP side. Using fallback credentials/local cache.");
     return null;
   }
 };
@@ -569,8 +567,8 @@ const syncProjects = async (auth: { token: string; isApiKey: boolean }, spreadsh
     const deduplicatedList = Array.from(deduplicatedMap.values());
     fs.writeFileSync(PROJECTS_FALLBACK_FILE, JSON.stringify(deduplicatedList, null, 2));
     return deduplicatedList;
-  } catch (err) {
-    console.error("❌ Error syncing projects from Google Sheets, using local cache:", err);
+  } catch (err: any) {
+    console.log("ℹ️ Info: Syncing projects from Google Sheets fell back to local cache: " + (err?.message || err));
     if (fs.existsSync(PROJECTS_FALLBACK_FILE)) {
       return JSON.parse(fs.readFileSync(PROJECTS_FALLBACK_FILE, "utf-8"));
     }
@@ -711,14 +709,46 @@ const syncSubmissions = async (auth: { token: string; isApiKey: boolean }, sprea
         },
         body: JSON.stringify({ values: [headers] })
       });
+      
+      if (fs.existsSync(SUBMISSIONS_FALLBACK_FILE)) {
+        try {
+          return JSON.parse(fs.readFileSync(SUBMISSIONS_FALLBACK_FILE, "utf-8"));
+        } catch {
+          return [];
+        }
+      }
       return [];
     }
 
     const parsed = parseSubmissionsRows(rows);
-    fs.writeFileSync(SUBMISSIONS_FALLBACK_FILE, JSON.stringify(parsed, null, 2));
-    return parsed;
-  } catch (err) {
-    console.error("❌ Error syncing DSR submissions from Google Sheets, using local cache:", err);
+    
+    let localList: any[] = [];
+    try {
+      if (fs.existsSync(SUBMISSIONS_FALLBACK_FILE)) {
+        localList = JSON.parse(fs.readFileSync(SUBMISSIONS_FALLBACK_FILE, "utf-8"));
+      }
+    } catch {
+      localList = [];
+    }
+
+    // Identify local-only entries that don't exist in the parsed Google Sheets results
+    const parsedIds = new Set(parsed.map((e: any) => e.id));
+    const localOnly = localList.filter((e: any) => e && e.id && !parsedIds.has(e.id));
+
+    // Merge both lists
+    const combined = [...localOnly, ...parsed];
+
+    // Sort descending by date/createdAt to keep newest first
+    combined.sort((a: any, b: any) => {
+      const dateA = new Date(a.createdAt || a.date || 0).getTime();
+      const dateB = new Date(b.createdAt || b.date || 0).getTime();
+      return dateB - dateA;
+    });
+
+    fs.writeFileSync(SUBMISSIONS_FALLBACK_FILE, JSON.stringify(combined, null, 2));
+    return combined;
+  } catch (err: any) {
+    console.log("ℹ️ Info: Syncing DSR submissions from Google Sheets fell back to local cache: " + (err?.message || err));
     if (fs.existsSync(SUBMISSIONS_FALLBACK_FILE)) {
       return JSON.parse(fs.readFileSync(SUBMISSIONS_FALLBACK_FILE, "utf-8"));
     }
@@ -1214,7 +1244,7 @@ app.get("/api/config-status", async (req, res) => {
     serviceAccountEmail: serviceAccountEmail || "None",
     projectsSpreadsheetId: projectsId,
     logsSpreadsheetId: logsId,
-    fetchStatus: { ok: !!token, error: token ? "" : "No token authorized" },
+    fetchStatus: { ok: !!token, error: token ? "" : (lastGoogleAuthError || "No token authorized") },
     databaseStatus: { ok: true, error: "" }
   });
 });
@@ -1700,8 +1730,17 @@ const syncRankings = async (auth: any, spreadsheetId: string): Promise<Record<st
         rankingsObj[projectId][keyword] = { ranking, lastChecked };
       }
 
-      writeRankings(rankingsObj);
-      return rankingsObj;
+      const localRankings = readRankings();
+      const mergedObj = { ...localRankings };
+      for (const pId of Object.keys(rankingsObj)) {
+        mergedObj[pId] = {
+          ...(mergedObj[pId] || {}),
+          ...rankingsObj[pId]
+        };
+      }
+
+      writeRankings(mergedObj);
+      return mergedObj;
     } else {
       console.warn(`Failed to fetch rankings from sheet. Status ${res.status}. Using local cache.`);
     }
@@ -1887,85 +1926,118 @@ app.get("/api/rankings", async (req, res) => {
 
 // POST check rankings endpoint
 app.post("/api/rankings/check", async (req, res) => {
-  const { projectId, keyword, domain } = req.body;
-  if (!projectId || !domain) {
-    return res.status(400).json({ error: "projectId and domain are required." });
-  }
-
-  const rankings = readRankings();
-  if (!rankings[projectId]) {
-    rankings[projectId] = {};
-  }
-
-  const timestamp = new Date().toISOString();
-
-  if (keyword) {
-    // Check single keyword
-    const rank = await checkSerpRanking(keyword, domain);
-    rankings[projectId][keyword] = {
-      ranking: rank,
-      lastChecked: timestamp
-    };
-    writeRankings(rankings);
-
-    // Save to Google Sheets if auth available
-    try {
-      const auth = await getGoogleAuth(req);
-      const spreadsheetId = getSpreadsheetId(req, 'logs');
-      if (auth && spreadsheetId && !auth.isApiKey) {
-        await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
-      }
-    } catch (e) {
-      console.error("Error writing single keyword ranking to Google Sheets:", e);
+  try {
+    const { projectId, keyword, domain } = req.body || {};
+    if (!projectId || !domain) {
+      return res.status(400).json({ error: "projectId and domain are required." });
     }
 
-    return res.json({ projectId, keyword, ranking: rankings[projectId][keyword] });
-  } else {
-    // Check all keywords for the project
-    let projectKeywords: string[] = [];
-    try {
-      const projectsFile = path.join(DB_DIR, "projects_fallback.json");
-      if (fs.existsSync(projectsFile)) {
-        const projs = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
-        const found = projs.find((p: any) => p.id === projectId);
-        if (found && found.keywords) {
-          projectKeywords = found.keywords;
+    const rankings = readRankings();
+    if (!rankings[projectId]) {
+      rankings[projectId] = {};
+    }
+
+    const timestamp = new Date().toISOString();
+
+    if (keyword) {
+      // Check single keyword
+      const rank = await checkSerpRanking(keyword, domain);
+      rankings[projectId][keyword] = {
+        ranking: rank,
+        lastChecked: timestamp
+      };
+      writeRankings(rankings);
+
+      // Save to Google Sheets if auth available
+      try {
+        const auth = await getGoogleAuth(req);
+        const spreadsheetId = getSpreadsheetId(req, 'logs');
+        if (auth && spreadsheetId && !auth.isApiKey) {
+          await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
+        }
+      } catch (e) {
+        console.error("Error writing single keyword ranking to Google Sheets:", e);
+      }
+
+      return res.json({ projectId, keyword, ranking: rankings[projectId][keyword] });
+    } else {
+      // Check all keywords for the project
+      let projectKeywords: string[] = [];
+      try {
+        const projectsFile = path.join(DB_DIR, "projects_fallback.json");
+        if (fs.existsSync(projectsFile)) {
+          const projs = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
+          const found = projs.find((p: any) => p.id === projectId);
+          if (found && found.keywords) {
+            projectKeywords = [...found.keywords];
+          }
+        }
+      } catch (e) {
+        console.error("Error loading project keywords for checking all:", e);
+      }
+
+      // Also extract keywords submitted in DSR logs (submissions_fallback.json) for this project
+      try {
+        const submissionsFile = path.join(DB_DIR, "submissions_fallback.json");
+        if (fs.existsSync(submissionsFile)) {
+          const submissions = JSON.parse(fs.readFileSync(submissionsFile, "utf-8"));
+          if (Array.isArray(submissions)) {
+            for (const sub of submissions) {
+              if (sub && Array.isArray(sub.works)) {
+                for (const work of sub.works) {
+                  if (work && work.projectId === projectId && Array.isArray(work.selectedKeywords)) {
+                    for (const kw of work.selectedKeywords) {
+                      if (kw && typeof kw === 'string' && kw.trim()) {
+                        const cleaned = kw.trim();
+                        if (!projectKeywords.map(k => k.toLowerCase()).includes(cleaned.toLowerCase())) {
+                          projectKeywords.push(cleaned);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error loading project keywords from submissions on server:", e);
+      }
+
+      if (projectKeywords.length === 0) {
+        return res.status(404).json({ error: "No keywords found or mapped for this project." });
+      }
+
+      const results: Record<string, { ranking: string; lastChecked: string }> = {};
+      for (const kw of projectKeywords) {
+        if (kw && kw.trim()) {
+          const rank = await checkSerpRanking(kw, domain);
+          rankings[projectId][kw] = {
+            ranking: rank,
+            lastChecked: timestamp
+          };
+          results[kw] = rankings[projectId][kw];
         }
       }
-    } catch (e) {
-      console.error("Error loading project keywords for checking all:", e);
-    }
 
-    if (projectKeywords.length === 0) {
-      return res.status(404).json({ error: "No keywords found or mapped for this project." });
-    }
+      writeRankings(rankings);
 
-    const results: Record<string, { ranking: string; lastChecked: string }> = {};
-    for (const kw of projectKeywords) {
-      if (kw && kw.trim()) {
-        const rank = await checkSerpRanking(kw, domain);
-        rankings[projectId][kw] = {
-          ranking: rank,
-          lastChecked: timestamp
-        };
-        results[kw] = rankings[projectId][kw];
+      // Save to Google Sheets if auth available
+      try {
+        const auth = await getGoogleAuth(req);
+        const spreadsheetId = getSpreadsheetId(req, 'logs');
+        if (auth && spreadsheetId && !auth.isApiKey) {
+          await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
+        }
+      } catch (e) {
+        console.error("Error writing all project keyword rankings to Google Sheets:", e);
       }
+
+      return res.json({ projectId, results });
     }
-
-    writeRankings(rankings);
-
-    // Save to Google Sheets if auth available
-    try {
-      const auth = await getGoogleAuth(req);
-      const spreadsheetId = getSpreadsheetId(req, 'logs');
-      if (auth && spreadsheetId && !auth.isApiKey) {
-        await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
-      }
-    } catch (e) {
-      console.error("Error writing all project keyword rankings to Google Sheets:", e);
-    }
-
-    return res.json({ projectId, results });
+  } catch (err: any) {
+    console.error("Error in POST /api/rankings/check:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -139,6 +139,7 @@ export default function DSRDashboard({
   const [rankings, setRankings] = useState<Record<string, Record<string, { ranking: string; lastChecked: string }>>>({});
   const [checkingProjectIds, setCheckingProjectIds] = useState<string[]>([]);
   const [checkingKeywords, setCheckingKeywords] = useState<string[]>([]); // "projectId_keyword"
+  const [rankingCheckError, setRankingCheckError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchRankings = async () => {
@@ -978,7 +979,36 @@ export default function DSRDashboard({
 
   const projectKeywordGroups = useMemo(() => {
     return filteredProjectsForMetrics.map((proj) => {
-      const kws = Array.isArray(proj.keywords) ? proj.keywords.filter(Boolean) : [];
+      // Get predefined keywords
+      const predefinedKws = Array.isArray(proj.keywords) ? proj.keywords.filter(Boolean) : [];
+      
+      // Extract keywords dynamically from all works submitted for this project
+      const submissionKws: string[] = [];
+      filteredWorks.forEach((work) => {
+        if (work.projectId === proj.id && Array.isArray(work.selectedKeywords)) {
+          work.selectedKeywords.forEach((kw) => {
+            if (kw && typeof kw === 'string' && kw.trim()) {
+              const cleanedKw = kw.trim();
+              if (!submissionKws.map(s => s.toLowerCase()).includes(cleanedKw.toLowerCase())) {
+                submissionKws.push(cleanedKw);
+              }
+            }
+          });
+        }
+      });
+
+      // Merge and deduplicate (case-insensitive deduplication, keeping the predefined casing if available)
+      const allKwsMap = new Map<string, string>();
+      predefinedKws.forEach(kw => {
+        allKwsMap.set(kw.toLowerCase().trim(), kw.trim());
+      });
+      submissionKws.forEach(kw => {
+        const lower = kw.toLowerCase().trim();
+        if (!allKwsMap.has(lower)) {
+          allKwsMap.set(lower, kw.trim());
+        }
+      });
+      const kws = Array.from(allKwsMap.values());
       
       const keywordItems = kws.map((kw) => {
         let timesWorked = 0;
@@ -986,7 +1016,7 @@ export default function DSRDashboard({
         
         filteredWorks.forEach((work) => {
           if (work.projectId === proj.id) {
-            const hasKeyword = Array.isArray(work.selectedKeywords) && work.selectedKeywords.includes(kw);
+            const hasKeyword = Array.isArray(work.selectedKeywords) && work.selectedKeywords.some(wKw => wKw.toLowerCase().trim() === kw.toLowerCase().trim());
             if (hasKeyword) {
               timesWorked++;
               if (lastWorked === 'Never' || work.date > lastWorked) {
@@ -996,9 +1026,10 @@ export default function DSRDashboard({
           }
         });
         
-        // Retrieve live ranking from our SERP state
+        // Retrieve live ranking from our SERP state with case-insensitive lookup
         const projRankings = rankings[proj.id] || {};
-        const kwRankObj = projRankings[kw];
+        const foundKey = Object.keys(projRankings).find(k => k.toLowerCase().trim() === kw.toLowerCase().trim());
+        const kwRankObj = foundKey ? projRankings[foundKey] : null;
         const ranking = kwRankObj ? kwRankObj.ranking : '—';
         const rankingLastChecked = kwRankObj ? kwRankObj.lastChecked : null;
         
@@ -2662,6 +2693,21 @@ export default function DSRDashboard({
               </div>
             </div>
 
+            {rankingCheckError && (
+              <div className="mx-4 mt-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold rounded-xl flex items-center justify-between gap-2 shadow-3xs animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="text-rose-600">⚠️</span>
+                  <span>{rankingCheckError}</span>
+                </div>
+                <button 
+                  onClick={() => setRankingCheckError(null)}
+                  className="hover:bg-rose-100 text-rose-900 rounded px-1.5 py-0.5 font-extrabold cursor-pointer transition text-[10px]"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {filteredProjectKeywordGroups.length === 0 ? (
               <div className="p-12 text-center text-xs text-gray-500 font-bold space-y-1 bg-slate-50/40 rounded-b-2xl border-t border-slate-150">
                 <p>No projects found matching the search criteria.</p>
@@ -2673,8 +2719,9 @@ export default function DSRDashboard({
                     <tr>
                       <th className="px-4 py-3 w-14 text-center">Sr No.</th>
                       <th className="px-4 py-3">Project Name</th>
-                      <th className="px-4 py-3">User</th>
+                      <th className="px-4 py-3">Domain</th>
                       <th className="px-4 py-3 text-center w-36">Total Keywords</th>
+                      <th className="px-4 py-3">User</th>
                       <th className="px-4 py-3 w-48">Last Check</th>
                     </tr>
                   </thead>
@@ -2708,17 +2755,22 @@ export default function DSRDashboard({
                               </div>
                             </td>
 
-                            {/* User column */}
-                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                              <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
-                                {getAssignedUsersForProject(proj.id)}
-                              </span>
+                            {/* Domain Column */}
+                            <td className="px-4 py-3.5 font-mono text-gray-650 font-semibold select-all">
+                              {proj.domain || <span className="text-gray-300">—</span>}
                             </td>
 
                             {/* Total Keywords */}
                             <td className="px-4 py-3.5 text-center font-mono font-bold text-gray-750">
                               <span className="inline-flex items-center justify-center font-bold px-2.5 py-0.5 rounded-full text-[10px] h-5 min-w-5 bg-amber-50 text-amber-800 border border-amber-200">
                                 {Array.isArray(proj.keywords) ? proj.keywords.length : 0}
+                              </span>
+                            </td>
+
+                            {/* User column */}
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
+                                {getAssignedUsersForProject(proj.id)}
                               </span>
                             </td>
 
@@ -2750,6 +2802,7 @@ export default function DSRDashboard({
                                       if (checkingProjectIds.includes(proj.id)) return;
                                       setCheckingProjectIds(prev => [...prev, proj.id]);
                                       try {
+                                        setRankingCheckError(null);
                                         const res = await fetch('/api/rankings/check', {
                                           method: 'POST',
                                           headers: { 'Content-Type': 'application/json' },
@@ -2761,9 +2814,13 @@ export default function DSRDashboard({
                                             const data = await resRankings.json();
                                             setRankings(data);
                                           }
+                                        } else {
+                                          const errData = await res.json().catch(() => ({}));
+                                          setRankingCheckError(errData.error || "Failed to check project rankings. Please verify that SERP_API_KEY is configured correctly.");
                                         }
                                       } catch (err) {
                                         console.error('Error checking project rankings:', err);
+                                        setRankingCheckError("Connection to backend ranking checker failed. Check if local dev server is running.");
                                       } finally {
                                         setCheckingProjectIds(prev => prev.filter(id => id !== proj.id));
                                       }
@@ -2786,7 +2843,7 @@ export default function DSRDashboard({
                           {/* Sub-table Dropdown for Keywords of this project */}
                           {isExpanded && (
                             <tr className="bg-slate-50/50">
-                              <td colSpan={5} className="px-6 py-4 border-t border-b border-gray-150">
+                              <td colSpan={6} className="px-6 py-4 border-t border-b border-gray-150">
                                 <div className="space-y-2">
                                   <div className="text-[10px] uppercase font-black text-gray-450 tracking-wider">
                                     Keyword Rankings &amp; Search Visibility Details
@@ -2801,8 +2858,8 @@ export default function DSRDashboard({
                                           <tr>
                                             <th className="px-3 py-2">Keyword</th>
                                             <th className="px-3 py-2">Domain</th>
-                                            <th className="px-3 py-2 text-center w-28">Times Worked</th>
                                             <th className="px-3 py-2 w-28">Ranking</th>
+                                            <th className="px-3 py-2 text-center w-28 pl-8">Times Worked</th>
                                             <th className="px-3 py-2 w-32">Last Worked</th>
                                           </tr>
                                         </thead>
@@ -2833,17 +2890,6 @@ export default function DSRDashboard({
                                                 )}
                                               </td>
 
-                                              {/* Times Worked */}
-                                              <td className="px-3 py-2.5 text-center">
-                                                <span className={`inline-flex items-center justify-center font-bold px-2 rounded-full text-[10px] h-5 min-w-5 leading-none font-mono ${
-                                                  kwItem.timesWorked > 0 
-                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
-                                                    : 'bg-gray-100 text-gray-400'
-                                                }`}>
-                                                  {kwItem.timesWorked}
-                                                </span>
-                                              </td>
-
                                               {/* Ranking */}
                                               <td className="px-3 py-2.5 text-gray-550 font-mono text-xs font-bold">
                                                 <div className="flex items-center gap-2">
@@ -2858,6 +2904,7 @@ export default function DSRDashboard({
                                                         if (checkingKeywords.includes(keyId)) return;
                                                         setCheckingKeywords(prev => [...prev, keyId]);
                                                         try {
+                                                          setRankingCheckError(null);
                                                           const res = await fetch('/api/rankings/check', {
                                                             method: 'POST',
                                                             headers: { 'Content-Type': 'application/json' },
@@ -2869,9 +2916,13 @@ export default function DSRDashboard({
                                                               const data = await resRankings.json();
                                                               setRankings(data);
                                                             }
+                                                          } else {
+                                                            const errData = await res.json().catch(() => ({}));
+                                                            setRankingCheckError(errData.error || `Failed to check ranking for "${kwItem.keyword}". Please verify that SERP_API_KEY is configured.`);
                                                           }
                                                         } catch (err) {
                                                           console.error('Error checking keyword ranking:', err);
+                                                          setRankingCheckError("Connection to backend ranking checker failed. Check if local dev server is running.");
                                                         } finally {
                                                           setCheckingKeywords(prev => prev.filter(k => k !== keyId));
                                                         }
@@ -2893,6 +2944,17 @@ export default function DSRDashboard({
                                                     </span>
                                                   )}
                                                 </div>
+                                              </td>
+
+                                              {/* Times Worked */}
+                                              <td className="px-3 py-2.5 text-center pl-8">
+                                                <span className={`inline-flex items-center justify-center font-bold px-2 rounded-full text-[10px] h-5 min-w-5 leading-none font-mono ${
+                                                  kwItem.timesWorked > 0 
+                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                                                    : 'bg-gray-100 text-gray-400'
+                                                }`}>
+                                                  {kwItem.timesWorked}
+                                                </span>
                                               </td>
 
                                               {/* Last Worked */}

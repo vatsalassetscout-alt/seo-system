@@ -111,6 +111,9 @@ export default function DSRSettings({
 
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
   const [serviceAccountConfigured, setServiceAccountConfigured] = useState(false);
+  const [fetchStatusError, setFetchStatusError] = useState('');
+  const [projectsSpreadsheetId, setProjectsSpreadsheetId] = useState('');
+  const [logsSpreadsheetId, setLogsSpreadsheetId] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
@@ -120,9 +123,12 @@ export default function DSRSettings({
         throw new Error('Failed to load credentials detail');
       })
       .then(data => {
-        if (data && data.serviceAccountEmail) {
-          setServiceAccountEmail(data.serviceAccountEmail);
+        if (data) {
+          if (data.serviceAccountEmail) setServiceAccountEmail(data.serviceAccountEmail);
           setServiceAccountConfigured(data.serviceAccountConfigured);
+          setFetchStatusError(data.fetchStatus?.error || '');
+          setProjectsSpreadsheetId(data.projectsSpreadsheetId || '');
+          setLogsSpreadsheetId(data.logsSpreadsheetId || '');
         }
       })
       .catch(err => console.error("Could not fetch service account detail:", err));
@@ -554,7 +560,6 @@ export default function DSRSettings({
             </div>
           </div>
         )}
-
 
 
       </div>

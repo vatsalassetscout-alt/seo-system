@@ -846,14 +846,14 @@ export default function DSRLogs({
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-sans">Admin Status Audit:</span>
                                 
                                 <button
-                                  onClick={() => onUpdateStatus(item.entryId, 'Approved')}
+                                  onClick={() => onUpdateStatus(item.entryId, item.status === 'Approved' ? 'Pending' : 'Approved')}
                                   className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer select-none font-sans ${
                                     item.status === 'Approved'
-                                      ? 'bg-emerald-600 text-white shadow-xs'
-                                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100/8 border border-emerald-100'
+                                      ? 'bg-amber-500 text-white shadow-xs hover:bg-amber-600'
+                                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-100'
                                   }`}
                                 >
-                                  ✓ Approve Task
+                                  {item.status === 'Approved' ? '⚠ Pending' : '✓ Approve Task'}
                                 </button>
                               </div>
                             )}
