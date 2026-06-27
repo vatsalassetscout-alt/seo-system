@@ -313,13 +313,48 @@ export default function DSRLogs({
     });
   }, [visibleEntries, isAdmin, selectedUsers, searchTerm, employeeNamesMap, projects, dateFilterType, customStartDate, customEndDate, selectedProjectId]);
 
-  // Flatten filtered entries so representation is flat: "one project submission is one log"
+  // Group filtered entries by user and target date
   const flatLogs = useMemo(() => {
-    const list: any[] = [];
+    const groups: Record<string, {
+      uniqueId: string;
+      userEmail: string;
+      filledForDate: string;
+      submittedAt: string;
+      status: 'Pending' | 'Approved' | 'Needs Revision';
+      entryIds: string[];
+      works: any[];
+    }> = {};
+
     filteredEntries.forEach((entry) => {
-      const works = entry.works || [];
-      works.forEach((w, index) => {
-        // Only include if matches project select filter
+      const emailLower = (entry.userEmail || '').trim().toLowerCase();
+      const rawDate = entry.date || '';
+      const dateStr = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
+      const key = `${emailLower}_${dateStr}`;
+
+      if (!groups[key]) {
+        groups[key] = {
+          uniqueId: `group-${emailLower}-${dateStr}`,
+          userEmail: entry.userEmail,
+          filledForDate: dateStr,
+          submittedAt: entry.createdAt,
+          status: entry.status || 'Pending',
+          entryIds: [entry.id],
+          works: []
+        };
+      } else {
+        if (entry.createdAt && entry.createdAt > groups[key].submittedAt) {
+          groups[key].submittedAt = entry.createdAt;
+        }
+        if (!groups[key].entryIds.includes(entry.id)) {
+          groups[key].entryIds.push(entry.id);
+        }
+        if (entry.status === 'Needs Revision' || (entry.status === 'Pending' && groups[key].status === 'Approved')) {
+          groups[key].status = entry.status;
+        }
+      }
+
+      const entryWorks = entry.works || [];
+      entryWorks.forEach((w, index) => {
         const selectedProjObj = projects.find(p => p.id === selectedProjectId);
         let matchesProj = selectedProjectId === 'all';
         if (!matchesProj) {
@@ -332,15 +367,7 @@ export default function DSRLogs({
 
         if (!matchesProj) return;
 
-        list.push({
-          uniqueId: `${entry.id}-${w.id || index}`,
-          entryId: entry.id,
-          // Parent / Metadata
-          filledForDate: entry.date,
-          submittedAt: entry.createdAt,
-          userEmail: entry.userEmail,
-          status: entry.status || 'Pending',
-          // Work specific item details
+        groups[key].works.push({
           workId: w.id || `work-${index}`,
           projectId: w.projectId,
           projectName: w.projectName,
@@ -358,12 +385,14 @@ export default function DSRLogs({
           contentUpdates: w.contentUpdates || [],
           priority: w.priority || '',
           frequency: w.frequency || '',
-          customValues: w.customValues || {}
+          customValues: w.customValues || {},
+          selectedKeywords: w.selectedKeywords || w.customValues?.selectedKeywords || []
         });
       });
     });
 
-    // Sort flat list by filled for target date desc, and then by real-time submission timestamp desc
+    const list = Object.values(groups).filter(g => g.works.length > 0);
+
     return list.sort((a, b) => {
       const dateCompare = (b.filledForDate || '').localeCompare(a.filledForDate || '');
       if (dateCompare !== 0) return dateCompare;
@@ -600,8 +629,22 @@ export default function DSRLogs({
                 : 'Sync';
 
               const isExpanded = !!expandedEntries[item.uniqueId];
-              const matchedProj = projects.find(p => p.id === item.projectId);
               const activeUserDisplayName = employeeNamesMap[item.userEmail?.toLowerCase()] || item.userEmail;
+
+              const totalListings = item.works.reduce((sum: number, w: any) => sum + (w.listingCount || 0), 0);
+              const totalBlogs = item.works.reduce((sum: number, w: any) => sum + (w.blogCount || 0), 0);
+              const totalForums = item.works.reduce((sum: number, w: any) => sum + (w.forumCount || 0), 0);
+              const totalPdfs = item.works.reduce((sum: number, w: any) => sum + (w.pdfCount || 0), 0);
+              const totalImages = item.works.reduce((sum: number, w: any) => sum + (w.imageCount || 0), 0);
+              const totalVideos = item.works.reduce((sum: number, w: any) => sum + (w.videoPptCount || 0), 0);
+              const totalProfiles = item.works.reduce((sum: number, w: any) => sum + (w.profileCount || 0), 0);
+              const totalLinks = item.works.reduce((sum: number, w: any) => sum + (w.linkCount || 0), 0);
+              
+              // Unique project names submitted
+              const projectNames = Array.from(new Set(item.works.map((w: any) => {
+                const p = projects.find(proj => proj.id === w.projectId);
+                return p ? p.name : (w.projectName || 'Custom Project');
+              })));
 
               return (
                 <div
@@ -643,12 +686,14 @@ export default function DSRLogs({
 
                     <div className="flex items-center justify-between sm:justify-end gap-2.5 mt-1 sm:mt-0 pt-2.5 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                       {/* Left Side inline counts summary */}
-                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-black text-slate-650 bg-slate-50/60 border border-slate-150/40 px-2 py-1 rounded-lg">
-                        <span className="text-indigo-600 font-bold">{matchedProj?.name || item.projectName || 'Log'}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-black text-slate-650 bg-slate-50/60 border border-slate-150/40 px-2 py-1 rounded-lg max-w-xs sm:max-w-md truncate">
+                        <span className="text-indigo-600 font-bold truncate max-w-[150px]" title={projectNames.join(', ')}>
+                          {projectNames.join(', ') || 'Log'}
+                        </span>
                         <span className="text-slate-300">|</span>
-                        <span>{item.listingCount} List</span>
+                        <span>{totalListings} List</span>
                         <span className="text-slate-300">•</span>
-                        <span>{item.blogCount} Blog</span>
+                        <span>{totalBlogs} Blog</span>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -684,143 +729,156 @@ export default function DSRLogs({
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden bg-white"
                       >
-                        <div className="p-4 sm:p-5 space-y-4 border-t border-slate-150 bg-slate-50/20 text-left">
-                          {/* Inner details header */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-slate-150">
-                            <div>
-                              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Project Assignment</h4>
-                              <p className="text-sm font-black text-slate-900 mt-1 flex items-center gap-2">
-                                📂 {matchedProj?.name || item.projectName || 'Custom Project Allocation'}
-                                {matchedProj?.domain && (
-                                  <span className="font-mono text-xs text-slate-500 font-bold bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">
-                                    {matchedProj.domain}
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Target Representation</h4>
-                              <p className="text-xs font-extrabold text-indigo-705 bg-indigo-50/45 border border-indigo-100/50 px-3 py-1.5 rounded-xl mt-1 inline-block">
-                                🗓️ Filled for Target Report Date: <strong className="text-indigo-900">{formattedFilledDate}</strong> ({parsedFilledDate.toLocaleDateString('en-US', { weekday: 'long' })})
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* SEO & Content metrics grids */}
-                          <div className="space-y-3">
-                            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Achieved Quantified Metrics</h4>
-                            
-                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
-                              {item.listingCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Listings Done</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.listingCount}</span>
-                                </div>
-                              )}
-                              {item.blogCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Blogs Published</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.blogCount}</span>
-                                </div>
-                              )}
-                              {item.forumCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Forums Posted</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.forumCount}</span>
-                                </div>
-                              )}
-                              {item.pdfCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">PDFs Handled</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.pdfCount}</span>
-                                </div>
-                              )}
-                              {item.imageCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Images Optimized</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.imageCount}</span>
-                                </div>
-                              )}
-                              {item.videoPptCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Video/PPT Inputs</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.videoPptCount}</span>
-                                </div>
-                              )}
-                              {item.profileCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Profiles Created</span>
-                                  <span className="block font-mono text-xs font-black text-slate-905">{item.profileCount}</span>
-                                </div>
-                              )}
-                              {item.linkCount > 0 && (
-                                <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                  <span className="block text-[9px] font-black text-indigo-400 uppercase tracking-wider font-sans">Total Backlinks</span>
-                                  <span className="block font-mono text-xs font-black text-indigo-905">{item.linkCount}</span>
-                                </div>
-                              )}
-
-                              {customSubmissionTypes && customSubmissionTypes.map((type) => {
-                                const rawVal = item.customValues?.[type.id];
-                                const count = rawVal !== undefined ? Number(rawVal) : 0;
-                                if (count <= 0) return null;
-                                return (
-                                  <div key={type.id} className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
-                                    <span className="block text-[9px] font-black text-purple-600 uppercase tracking-wider truncate font-sans" title={type.name}>
-                                      {type.name}
-                                    </span>
-                                    <span className="block font-mono text-xs font-black text-purple-905">{count}</span>
+                        <div className="p-4 sm:p-5 space-y-5 border-t border-slate-150 bg-slate-50/20 text-left">
+                          
+                          {/* Inner list of submitted project works */}
+                          <div className="space-y-6">
+                            {item.works.map((work: any, idx: number) => {
+                              const workMatchedProj = projects.find(p => p.id === work.projectId);
+                              return (
+                                <div key={work.workId || idx} className="space-y-4 pb-6 last:pb-0 border-b border-dashed border-slate-200 last:border-b-0">
+                                  {/* Inner details header */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2">
+                                    <div>
+                                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                                        Project Assignment {item.works.length > 1 ? `#${idx + 1}` : ''}
+                                      </h4>
+                                      <p className="text-sm font-black text-slate-900 mt-1 flex items-center gap-2">
+                                        📂 {workMatchedProj?.name || work.projectName || 'Custom Project Allocation'}
+                                        {workMatchedProj?.domain && (
+                                          <span className="font-mono text-xs text-slate-500 font-bold bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">
+                                            {workMatchedProj.domain}
+                                          </span>
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Target Representation</h4>
+                                      <p className="text-xs font-extrabold text-indigo-705 bg-indigo-50/45 border border-indigo-100/50 px-3 py-1.5 rounded-xl mt-1 inline-block">
+                                        🗓️ Filled for Target Report Date: <strong className="text-indigo-900">{formattedFilledDate}</strong>
+                                      </p>
+                                    </div>
                                   </div>
-                                );
-                              })}
-                            </div>
-                          </div>
 
-                          {/* Blog Backlink URLs if exists */}
-                          {item.blog && (
-                            <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-150 shadow-3xs">
-                              <h4 className="text-[10px] font-black text-indigo-650 uppercase tracking-wider flex items-center gap-1.5">
-                                <ExternalLink size={11} />
-                                Published Blog & Live Backlink URL
-                              </h4>
-                              <a
-                                href={item.blog}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs font-mono font-semibold text-indigo-750 hover:text-indigo-900 hover:underline break-all block"
-                              >
-                                {item.blog}
-                              </a>
-                            </div>
-                          )}
+                                  {/* SEO & Content metrics grids */}
+                                  <div className="space-y-3">
+                                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Achieved Quantified Metrics</h4>
+                                    
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
+                                      {work.listingCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Listings Done</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.listingCount}</span>
+                                        </div>
+                                      )}
+                                      {work.blogCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Blogs Published</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.blogCount}</span>
+                                        </div>
+                                      )}
+                                      {work.forumCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Forums Posted</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.forumCount}</span>
+                                        </div>
+                                      )}
+                                      {work.pdfCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">PDFs Handled</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.pdfCount}</span>
+                                        </div>
+                                      )}
+                                      {work.imageCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Images Optimized</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.imageCount}</span>
+                                        </div>
+                                      )}
+                                      {work.videoPptCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Video/PPT Inputs</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.videoPptCount}</span>
+                                        </div>
+                                      )}
+                                      {work.profileCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider font-sans">Profiles Created</span>
+                                          <span className="block font-mono text-xs font-black text-slate-905">{work.profileCount}</span>
+                                        </div>
+                                      )}
+                                      {work.linkCount > 0 && (
+                                        <div className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                          <span className="block text-[9px] font-black text-indigo-400 uppercase tracking-wider font-sans">Total Backlinks</span>
+                                          <span className="block font-mono text-xs font-black text-indigo-905">{work.linkCount}</span>
+                                        </div>
+                                      )}
 
-                          {/* Work summary descriptive report block */}
-                          <div className="space-y-1.5">
-                            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Daily Narrative & Action Items</h4>
-                            <div className="bg-white p-3.5 rounded-2xl border border-slate-150 shadow-3xs text-xs text-slate-805 leading-relaxed font-semibold">
-                              {item.workSummary ? (
-                                <p className="whitespace-pre-wrap">{item.workSummary}</p>
-                              ) : (
-                                <p className="text-slate-404 italic">No summary description provided for this log block.</p>
-                              )}
+                                      {customSubmissionTypes && customSubmissionTypes.map((type) => {
+                                        const rawVal = work.customValues?.[type.id];
+                                        const count = rawVal !== undefined ? Number(rawVal) : 0;
+                                        if (count <= 0) return null;
+                                        return (
+                                          <div key={type.id} className="bg-white border border-slate-150 p-2.5 rounded-xl text-center space-y-0.5 shadow-3xs">
+                                            <span className="block text-[9px] font-black text-purple-600 uppercase tracking-wider truncate font-sans" title={type.name}>
+                                              {type.name}
+                                            </span>
+                                            <span className="block font-mono text-xs font-black text-purple-905">{count}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
 
-                              {/* Keywords attached logs */}
-                              {((item.selectedKeywords && item.selectedKeywords.length > 0) || (item.customValues?.selectedKeywords && Array.isArray(item.customValues.selectedKeywords) && item.customValues.selectedKeywords.length > 0)) && (
-                                <div className="mt-3.5 pt-3 border-t border-slate-150 flex flex-wrap items-center gap-2">
-                                  <span className="text-[9.5px] font-black text-slate-405 uppercase tracking-wide font-sans">Target Keywords:</span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {(((item.selectedKeywords || item.customValues?.selectedKeywords || []) as string[]).filter(Boolean)).map((kw: string, idx: number) => (
-                                      <span key={kw} className="bg-amber-100/50 border border-amber-205 text-amber-900 px-2 py-0.5 rounded-md font-sans text-[10px] font-black flex items-center gap-1.5">
-                                        <span className="bg-amber-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 font-mono leading-none">
-                                          {idx + 1}
-                                        </span>
-                                        {kw}
-                                      </span>
-                                    ))}
+                                  {/* Blog Backlink URLs if exists */}
+                                  {work.blog && (
+                                    <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-150 shadow-3xs">
+                                      <h4 className="text-[10px] font-black text-indigo-650 uppercase tracking-wider flex items-center gap-1.5">
+                                        <ExternalLink size={11} />
+                                        Published Blog & Live Backlink URL
+                                      </h4>
+                                      <a
+                                        href={work.blog}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs font-mono font-semibold text-indigo-750 hover:text-indigo-900 hover:underline break-all block"
+                                      >
+                                        {work.blog}
+                                      </a>
+                                    </div>
+                                  )}
+
+                                  {/* Work summary descriptive report block */}
+                                  <div className="space-y-1.5">
+                                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Daily Narrative & Action Items</h4>
+                                    <div className="bg-white p-3.5 rounded-2xl border border-slate-150 shadow-3xs text-xs text-slate-805 leading-relaxed font-semibold">
+                                      {work.workSummary ? (
+                                        <p className="whitespace-pre-wrap">{work.workSummary}</p>
+                                      ) : (
+                                        <p className="text-slate-404 italic">No summary description provided for this log block.</p>
+                                      )}
+
+                                      {/* Keywords attached logs */}
+                                      {((work.selectedKeywords && work.selectedKeywords.length > 0) || (work.customValues?.selectedKeywords && Array.isArray(work.customValues.selectedKeywords) && work.customValues.selectedKeywords.length > 0)) && (
+                                        <div className="mt-3.5 pt-3 border-t border-slate-150 flex flex-wrap items-center gap-2">
+                                          <span className="text-[9.5px] font-black text-slate-405 uppercase tracking-wide font-sans">Target Keywords:</span>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {(((work.selectedKeywords || work.customValues?.selectedKeywords || []) as string[]).filter(Boolean)).map((kw: string, idx: number) => (
+                                              <span key={kw} className="bg-amber-100/50 border border-amber-205 text-amber-900 px-2 py-0.5 rounded-md font-sans text-[10px] font-black flex items-center gap-1.5">
+                                                <span className="bg-amber-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 font-mono leading-none">
+                                                  {idx + 1}
+                                                </span>
+                                                {kw}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                              )}
-                            </div>
+                              );
+                            })}
                           </div>
 
                           {/* Inline control actions – approve/revision or delete */}
@@ -829,8 +887,10 @@ export default function DSRLogs({
                             {onDeleteEntry ? (
                               <button
                                 onClick={() => {
-                                  if (confirm("Are you sure you want to permanently delete this task log? This will modify the Google Sheets records.")) {
-                                    onDeleteEntry(item.entryId);
+                                  if (confirm("Are you sure you want to permanently delete all task logs for this date? This will modify the Google Sheets records.")) {
+                                    item.entryIds.forEach((id: string) => {
+                                      onDeleteEntry(id);
+                                    });
                                   }
                                 }}
                                 className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer font-sans"
@@ -846,7 +906,11 @@ export default function DSRLogs({
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-sans">Admin Status Audit:</span>
                                 
                                 <button
-                                  onClick={() => onUpdateStatus(item.entryId, item.status === 'Approved' ? 'Pending' : 'Approved')}
+                                  onClick={() => {
+                                    item.entryIds.forEach((id: string) => {
+                                      onUpdateStatus(id, item.status === 'Approved' ? 'Pending' : 'Approved');
+                                    });
+                                  }}
                                   className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer select-none font-sans ${
                                     item.status === 'Approved'
                                       ? 'bg-amber-500 text-white shadow-xs hover:bg-amber-600'

@@ -73,6 +73,8 @@ interface DSRSettingsProps {
   onUpdateProjects?: (updatedProjects: Project[]) => void;
   alerts?: any[];
   onAddAlert?: (alert: any) => void;
+  onClearMultipleAlerts?: (ids: string[]) => void;
+  onResetToDefault?: () => void;
 }
 
 export default function DSRSettings({
@@ -99,9 +101,15 @@ export default function DSRSettings({
   onUpdateProjects,
   alerts = [],
   onAddAlert = () => {},
+  onClearMultipleAlerts,
+  onResetToDefault,
 }: DSRSettingsProps) {
   // Navigation Tabs inside Settings Panel
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'assignments'>('users');
+
+  // Deletion selection states for assignments
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
 
   // Input states
   const [newAdminEmail, setNewAdminEmail] = useState('');
@@ -221,30 +229,42 @@ export default function DSRSettings({
     <div className="space-y-8 animate-fade-in">
       
       {/* Internal Setup Tabs */}
-      <div className="flex border-b border-gray-150 gap-2 overflow-x-auto pb-px">
-        <button
-          onClick={() => setActiveSubTab('users')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeSubTab === 'users'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <Users size={15} />
-          Users
-        </button>
+      <div className="flex flex-wrap items-center justify-between border-b border-gray-150 gap-4 pb-px">
+        <div className="flex gap-2 overflow-x-auto">
+          <button
+            onClick={() => setActiveSubTab('users')}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
+              activeSubTab === 'users'
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
+            }`}
+          >
+            <Users size={15} />
+            Users
+          </button>
 
-        <button
-          onClick={() => setActiveSubTab('assignments')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeSubTab === 'assignments'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <Lock size={15} />
-          Assign Project
-        </button>
+          <button
+            onClick={() => setActiveSubTab('assignments')}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
+              activeSubTab === 'assignments'
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
+            }`}
+          >
+            <Lock size={15} />
+            Assign Project
+          </button>
+        </div>
+
+        {onResetToDefault && (
+          <button
+            onClick={onResetToDefault}
+            className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 rounded-xl transition cursor-pointer self-center"
+          >
+            <Database size={13} className="shrink-0" />
+            Reset Workspace & Clear All Data
+          </button>
+        )}
       </div>
 
       {/* Sub-Alert status notifications */}
@@ -479,14 +499,91 @@ export default function DSRSettings({
 
               {/* Assignments History & Status Tracker Table */}
               <div className="md:col-span-2 space-y-4">
-                <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
-                  🛡️ Active Task Assignments Board
-                </h5>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <h5 className="font-bold text-gray-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
+                    🛡️ Active Task Assignments Board
+                  </h5>
+                  
+                  {/* Delete Task Toggle / Controls */}
+                  <div className="flex items-center gap-2">
+                    {isDeleteMode ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allAssignmentIds = (alerts || [])
+                              .filter(a => a.alertType === 'project_assignment')
+                              .map(a => a.id);
+                            if (selectedAssignmentIds.length === allAssignmentIds.length) {
+                              setSelectedAssignmentIds([]);
+                            } else {
+                              setSelectedAssignmentIds(allAssignmentIds);
+                            }
+                          }}
+                          className="px-2.5 py-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition cursor-pointer"
+                        >
+                          {selectedAssignmentIds.length === (alerts || []).filter(a => a.alertType === 'project_assignment').length
+                            ? 'Deselect All'
+                            : 'Select All'}
+                        </button>
+                        
+                        <button
+                          type="button"
+                          disabled={selectedAssignmentIds.length === 0}
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to delete ${selectedAssignmentIds.length} selected task assignment(s)?`)) {
+                              if (onClearMultipleAlerts) {
+                                onClearMultipleAlerts(selectedAssignmentIds);
+                              }
+                              setSelectedAssignmentIds([]);
+                              setIsDeleteMode(false);
+                            }
+                          }}
+                          className={`px-3 py-1 text-[10px] font-bold text-white rounded-lg transition flex items-center gap-1 shadow-2xs cursor-pointer ${
+                            selectedAssignmentIds.length === 0
+                              ? 'bg-gray-300 cursor-not-allowed'
+                              : 'bg-rose-600 hover:bg-rose-700'
+                          }`}
+                        >
+                          <Trash2 size={11} />
+                          Delete ({selectedAssignmentIds.length})
+                        </button>
+                        
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeleteMode(false);
+                            setSelectedAssignmentIds([]);
+                          }}
+                          className="px-2.5 py-1 text-[10px] font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      (alerts || []).some(a => a.alertType === 'project_assignment') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeleteMode(true);
+                            setSelectedAssignmentIds([]);
+                          }}
+                          className="px-3 py-1.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                          Delete Active Assignments
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+
                 <div className="bg-white border border-gray-150 rounded-2xl overflow-hidden shadow-2xs">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-gray-50/70 border-b border-gray-150 font-bold text-gray-500 text-[10px] uppercase">
                         <tr>
+                          {isDeleteMode && <th className="px-4 py-3 w-10 text-center">Select</th>}
                           <th className="px-4 py-3">Reporter</th>
                           <th className="px-4 py-3">Project</th>
                           <th className="px-4 py-3">Date</th>
@@ -500,7 +597,7 @@ export default function DSRSettings({
                           if (assignmentAlertsList.length === 0) {
                             return (
                               <tr>
-                                <td colSpan={5} className="px-4 py-8 text-center text-gray-400 italic">
+                                <td colSpan={isDeleteMode ? 6 : 5} className="px-4 py-8 text-center text-gray-400 italic">
                                   No direct assignments have been registered yet.
                                 </td>
                               </tr>
@@ -516,10 +613,32 @@ export default function DSRSettings({
                               return matchesUser && matchesDate && hasProj;
                             });
 
-                            const userRecord = allowedUsers.find(u => u.email.toLowerCase() === asg.userEmail.toLowerCase());
+                            const isSelected = selectedAssignmentIds.includes(asg.id);
 
                             return (
-                              <tr key={asg.id} className="hover:bg-slate-50/40">
+                              <tr 
+                                key={asg.id} 
+                                onClick={() => {
+                                  if (isDeleteMode) {
+                                    if (isSelected) {
+                                      setSelectedAssignmentIds(prev => prev.filter(id => id !== asg.id));
+                                    } else {
+                                      setSelectedAssignmentIds(prev => [...prev, asg.id]);
+                                    }
+                                  }
+                                }}
+                                className={`hover:bg-slate-50/40 transition-colors ${isSelected ? 'bg-indigo-50/15' : ''} ${isDeleteMode ? 'cursor-pointer select-none' : ''}`}
+                              >
+                                {isDeleteMode && (
+                                  <td className="px-4 py-3.5 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      readOnly
+                                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                  </td>
+                                )}
                                 <td className="px-4 py-3.5">
                                   <div className="font-bold text-gray-900">{getUserDisplayName(asg.userEmail, allowedUsers)}</div>
                                   <div className="text-[10px] text-gray-400 font-mono">{asg.userEmail}</div>

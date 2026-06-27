@@ -232,6 +232,15 @@ export default function App() {
     }).catch(err => console.warn("Failed deleting alert on backend:", err));
   };
 
+  const handleClearMultipleAlerts = (ids: string[]) => {
+    setAlerts(prev => prev.filter(a => !ids.includes(a.id)));
+    fetch("/api/alerts/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+    }).catch(err => console.warn("Failed bulk deleting alerts on backend:", err));
+  };
+
   const [entries, setEntries] = useState<DSREntry[]>(() => {
     const saved = localStorage.getItem('dsr_entries');
     if (!saved) return INITIAL_DSR_ENTRIES;
@@ -333,67 +342,13 @@ export default function App() {
     return 'submit';
   });
 
-  // Synchronize dynamic data from our central Sheets API
+  const [dashboardSubTab, setDashboardSubTab] = useState<'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section'>('project_table');
+
+  // Synchronize dynamic data from our local database server
   const syncWithBackend = async () => {
     setIsSyncing(true);
     try {
-      const token = await getAccessToken();
-      const pSpreadsheetId = sheetSettings?.projectsSpreadsheetId || sheetSettings?.spreadsheetId;
-      const lSpreadsheetId = sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId;
-
-      // 1. Direct client-side Sheets API querying if token and spreadsheet ID are present
-      if (token && pSpreadsheetId) {
-        try {
-          console.log("Client-side direct Sheets query for projects initiated...");
-          const loadedProjects = await fetchProjectsFromSheet(
-            pSpreadsheetId,
-            sheetSettings?.projectsTab || 'Projects_Mapping',
-            token
-          );
-          if (loadedProjects && Array.isArray(loadedProjects)) {
-            let finalProjects = loadedProjects;
-            if (currentUserRole !== 'admin' && currentUserEmail) {
-              const emailLower = currentUserEmail.trim().toLowerCase();
-              finalProjects = loadedProjects.filter((p: any) => {
-                const assigned = Array.isArray(p.users) ? p.users : [];
-                const matchesUsers = assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
-                const matchesUserId = p.userId && String(p.userId).trim().toLowerCase() === emailLower;
-                return matchesUsers || matchesUserId;
-              });
-            }
-            setProjects(finalProjects);
-            localStorage.setItem('dsr_projects', JSON.stringify(finalProjects));
-
-            // Sync locations from spreadsheet fields
-            const locationsList = finalProjects.map((p: any) => ({
-              projectId: p.id,
-              north: p.location || "Mumbai",
-              west: p.region || "West"
-            }));
-            setProjectLocations(locationsList);
-            localStorage.setItem('dsr_project_locations', JSON.stringify(locationsList));
-          }
-        } catch (directProjErr) {
-          console.warn("Direct projects sheet query fell back/deferred:", directProjErr);
-        }
-
-        try {
-          console.log("Client-side direct Sheets query for submissions initiated...");
-          const loadedEntries = await fetchSubmissionsFromSheet(
-            lSpreadsheetId || pSpreadsheetId,
-            sheetSettings?.submissionsTab || 'DSR_Logs',
-            token
-          );
-          if (loadedEntries && Array.isArray(loadedEntries)) {
-            setEntries(loadedEntries);
-            localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
-          }
-        } catch (directSubErr) {
-          console.warn("Direct submissions sheet query fell back/deferred:", directSubErr);
-        }
-      }
-
-      // 2. Fetch access configurations from backend if available (otherwise utilize standard credentials)
+      // 1. Fetch access configurations from backend
       try {
         const authConfRes = await fetch("/api/auth/config");
         if (authConfRes.ok) {
@@ -413,17 +368,6 @@ export default function App() {
       }
 
       const syncHeaders: Record<string, string> = {};
-      if (sheetSettings?.projectsSpreadsheetId) {
-        syncHeaders["x-projects-spreadsheet-id"] = sheetSettings.projectsSpreadsheetId;
-      }
-      if (sheetSettings?.logsSpreadsheetId) {
-        syncHeaders["x-logs-spreadsheet-id"] = sheetSettings.logsSpreadsheetId;
-      }
-      if (sheetSettings?.spreadsheetId) {
-        syncHeaders["x-spreadsheet-id"] = sheetSettings.spreadsheetId;
-      }
-      syncHeaders["x-projects-tab"] = sheetSettings?.projectsTab || 'Projects_Mapping';
-      syncHeaders["x-submissions-tab"] = sheetSettings?.submissionsTab || 'DSR_Logs';
       if (currentUserEmail) {
         syncHeaders["x-user-email"] = currentUserEmail;
       }
@@ -431,13 +375,13 @@ export default function App() {
         syncHeaders["x-user-role"] = currentUserRole;
       }
 
-      // 3. Fetch consolidated filters from backend if available
+      // 2. Fetch projects and filters from backend
       try {
         const filterRes = await fetch("/api/filters", { headers: syncHeaders });
         if (filterRes.ok) {
           const filterData = await filterRes.json();
           if (filterData) {
-            if (!token && filterData.projects && Array.isArray(filterData.projects)) {
+            if (filterData.projects && Array.isArray(filterData.projects)) {
               setProjects(filterData.projects);
               localStorage.setItem('dsr_projects', JSON.stringify(filterData.projects));
               
@@ -469,23 +413,21 @@ export default function App() {
         console.warn("Express filters endpoint deferred:", errFilter);
       }
 
-      // 4. Fetch submissions from backend as fallbacks if direct token-fetching was not performed
-      if (!token) {
-        try {
-          const subRes = await fetch("/api/submissions", { headers: syncHeaders });
-          if (subRes.ok) {
-            const loadedEntries = await subRes.json();
-            if (loadedEntries && Array.isArray(loadedEntries)) {
-              setEntries(loadedEntries);
-              localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
-            }
+      // 3. Fetch submissions from backend
+      try {
+        const subRes = await fetch("/api/submissions", { headers: syncHeaders });
+        if (subRes.ok) {
+          const loadedEntries = await subRes.json();
+          if (loadedEntries && Array.isArray(loadedEntries)) {
+            setEntries(loadedEntries);
+            localStorage.setItem('dsr_entries', JSON.stringify(loadedEntries));
           }
-        } catch (subErr) {
-          console.warn("Express submissions endpoint deferred:", subErr);
         }
+      } catch (subErr) {
+        console.warn("Express submissions endpoint deferred:", subErr);
       }
 
-      // 5. Fetch alerts
+      // 4. Fetch alerts
       try {
         const alertRes = await fetch("/api/alerts");
         if (alertRes.ok) {
@@ -498,7 +440,7 @@ export default function App() {
         console.warn("Express alerts endpoint deferred:", alertErr);
       }
     } catch (err) {
-      console.warn("Express Sheets DB sync background failed, using local/browser storage:", err);
+      console.error("Local sync with backend failed:", err);
     } finally {
       setIsSyncing(false);
     }
@@ -832,59 +774,22 @@ export default function App() {
     // Save locally immediately
     setEntries((prev) => [newEntry, ...prev]);
 
-    // Send to Google Sheets (Client-direct priority, fallback to Express backend)
+    // Send to Local Database Server
     try {
-      const token = await getAccessToken();
-      const sheetId = sheetSettings?.logsSpreadsheetId || sheetSettings?.spreadsheetId;
-      const sheetName = sheetSettings?.submissionsTab || 'DSR_Logs';
-
-      if (token && sheetId) {
-        try {
-          console.log("Saving log directly to Google Sheet from browser...");
-          await appendSubmissionsToSheet(
-            sheetId,
-            sheetName,
-            worksData,
-            date,
-            currentUserEmail, // write actual unique user email/ID to GSheet
-            token
-          );
-          console.log("Direct client append succeeded!");
-          await syncWithBackend().catch((e) => console.warn(e));
-          return;
-        } catch (directErr) {
-          console.warn("Direct client append failed, trying backend fallback:", directErr);
-        }
-      }
-
-      // Backend fallback pathway
-      const appendHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (sheetSettings?.projectsSpreadsheetId) {
-        appendHeaders['x-projects-spreadsheet-id'] = sheetSettings.projectsSpreadsheetId;
-      }
-      if (sheetSettings?.logsSpreadsheetId) {
-        appendHeaders['x-logs-spreadsheet-id'] = sheetSettings.logsSpreadsheetId;
-      }
-      if (sheetSettings?.spreadsheetId) {
-        appendHeaders['x-spreadsheet-id'] = sheetSettings.spreadsheetId;
-      }
-      appendHeaders["x-projects-tab"] = sheetSettings?.projectsTab || 'Projects_Mapping';
-      appendHeaders["x-submissions-tab"] = sheetName;
-
       await fetch('/api/submissions/append', {
         method: 'POST',
-        headers: appendHeaders,
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           works: worksData,
           date,
-          userEmail: currentUserEmail, // Pass actual unique user email/ID to backend
+          userEmail: currentUserEmail,
         }),
       });
       await syncWithBackend().catch((e) => console.warn(e));
     } catch (err) {
-      console.warn('Backend/direct sheets appending fell through, cached locally:', err);
+      console.warn('Backend local database append failed, cached locally:', err);
     }
   };
 
@@ -966,27 +871,16 @@ export default function App() {
     }
   };
 
-  const handleResetToDefault = () => {
-    if (window.confirm('Reset workspace database? This will clear local overrides and let you fetch the latest clean configuration from Google Sheets.')) {
-      localStorage.removeItem('dsr_admin_emails');
-      localStorage.removeItem('dsr_projects');
-      localStorage.removeItem('dsr_entries');
-      localStorage.removeItem('dsr_logged_user');
-      localStorage.removeItem('dsr_custom_submission_types');
-      localStorage.removeItem('dsr_sheet_settings');
+  const handleResetToDefault = async () => {
+    if (window.confirm('Reset workspace database? This will clear all data, including work log history, alerts, custom types, and users to start completely fresh.')) {
+      try {
+        await fetch("/api/reset-database", { method: "POST" });
+      } catch (err) {
+        console.error("Failed to reset backend database:", err);
+      }
 
-      setAdminEmails(ADMIN_EMAILS);
-      setProjects(DEFAULT_PROJECTS);
-      setEntries(INITIAL_DSR_ENTRIES);
-      setCustomSubmissionTypes([]);
-      setSheetSettings({
-        spreadsheetId: '',
-        projectsTab: 'Projects',
-        submissionsTab: 'Submissions',
-        isConnected: false
-      });
-      setCurrentUserEmail(null);
-      setActiveTab('submit');
+      localStorage.clear();
+      window.location.reload();
     }
   };
 
@@ -1391,6 +1285,8 @@ export default function App() {
                   onAddAlert={handleAddAlert}
                   onUpdateProject={handleUpdateProject}
                   adminEmails={adminEmails}
+                  activeSubTab={dashboardSubTab}
+                  onSubTabChange={setDashboardSubTab}
                 />
               )}
 
@@ -1416,6 +1312,8 @@ export default function App() {
                   onUpdateProjects={setProjects}
                   alerts={alerts}
                   onAddAlert={handleAddAlert}
+                  onClearMultipleAlerts={handleClearMultipleAlerts}
+                  onResetToDefault={handleResetToDefault}
                 />
               )}
             </motion.div>

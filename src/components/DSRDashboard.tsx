@@ -44,6 +44,8 @@ interface DSRDashboardProps {
   onAddAlert?: (alert: any) => void;
   onUpdateProject?: (updatedProject: Project) => void;
   adminEmails?: string[];
+  activeSubTab?: 'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section';
+  onSubTabChange?: (tab: 'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section') => void;
 }
 
 export default function DSRDashboard({ 
@@ -57,7 +59,9 @@ export default function DSRDashboard({
   alerts = [],
   onAddAlert,
   onUpdateProject,
-  adminEmails = []
+  adminEmails = [],
+  activeSubTab,
+  onSubTabChange
 }: DSRDashboardProps) {
   // Filter entries based on role representation (Admins see everything, regular users see only their own)
   const parsedEntries = useMemo(() => {
@@ -82,12 +86,15 @@ export default function DSRDashboard({
   const [freqFilterType, setFreqFilterType] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
 
   // Navigation for the 5 horizontal buttons
-  const [activeTab, setActiveTab] = useState<'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section'>('project_table');
+  const [localActiveTab, setLocalActiveTab] = useState<'project_table' | 'frequency' | 'activity' | 'backlinks' | 'unworked_project' | 'keyword_section'>('project_table');
+  const activeTab = activeSubTab !== undefined ? activeSubTab : localActiveTab;
+  const setActiveTab = onSubTabChange !== undefined ? onSubTabChange : setLocalActiveTab;
 
   // Heatmap Calendar state declarations
   const [heatmapMonth, setHeatmapMonth] = useState<number>(5); // Default to June (index 5)
   const [heatmapYear, setHeatmapYear] = useState<number>(2026); // Default to 2026
   const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>('2026-06-16');
+  const [selectedUserProjects, setSelectedUserProjects] = useState<Record<string, string>>({});
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -1950,6 +1957,7 @@ export default function DSRDashboard({
                     });
 
                     const totalUpdates = dayWorks.length;
+                    const uniqueProjectsCount = new Set(dayWorks.map(w => w.projectId)).size;
                     const totalBacklinks = dayWorks.reduce((sum, w) => sum + (Number(w.listingCount) || 0) + (Number(w.blogCount) || 0) + (Number(w.forumCount) || 0) + (Number(w.pdfCount) || 0) + (Number(w.imageCount) || 0) + (Number(w.videoPptCount) || 0) + (Number(w.profileCount) || 0) + (Number(w.linkCount) || 0), 0);
 
                     // Assign premium indigo contributions heatmap colors based on task density
@@ -1983,17 +1991,17 @@ export default function DSRDashboard({
                         </span>
 
                         {/* Work indicator center counts */}
-                        {totalUpdates > 0 && (
+                        {uniqueProjectsCount > 0 && (
                           <div className="flex flex-col items-end leading-none text-right">
-                            <span className="text-xs sm:text-[14px] font-black tracking-tighter">
-                              {totalUpdates}
+                            <span className="text-sm sm:text-[17px] font-black tracking-tighter text-indigo-600 dark:text-inherit">
+                              {uniqueProjectsCount}
                             </span>
                           </div>
                         )}
                         
                         {/* Micro-tooltip */}
                         <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-950 border border-slate-800 text-white text-[9px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-xl shadow-xl whitespace-nowrap z-30 leading-none">
-                          {totalUpdates} task {totalUpdates === 1 ? 'update' : 'updates'} • {totalBacklinks} {totalBacklinks === 1 ? 'backlink' : 'backlinks'}
+                          {uniqueProjectsCount} {uniqueProjectsCount === 1 ? 'project' : 'projects'} • {totalUpdates} task {totalUpdates === 1 ? 'update' : 'updates'} • {totalBacklinks} {totalBacklinks === 1 ? 'backlink' : 'backlinks'}
                         </div>
                       </button>
                     );
@@ -2088,7 +2096,9 @@ export default function DSRDashboard({
                           <div className="flex gap-3">
                             <div className="text-center bg-white border border-slate-150 py-2 px-3 rounded-xl flex-1 shadow-3xs">
                               <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Content Updates</span>
-                              <span className="text-sm font-black text-slate-800">{dayWorks.length}</span>
+                              <span className="text-sm font-black text-slate-800">
+                                {dayWorks.reduce((sum, w) => sum + (w.contentUpdates?.length || 0), 0)}
+                              </span>
                             </div>
                             <div className="text-center bg-white border border-slate-150 py-2 px-3 rounded-xl flex-1 shadow-3xs">
                               <span className="block text-[8px] font-black uppercase text-indigo-600 tracking-wider">Backlinks</span>
@@ -2105,25 +2115,34 @@ export default function DSRDashboard({
                               No submissions logged on this date.
                             </div>
                           ) : (() => {
-                            // Group works by projectId for the selected day
-                            const worksByProject = dayWorks.reduce((acc, work) => {
-                              const pId = work.projectId;
-                              if (!acc[pId]) {
-                                acc[pId] = [];
+                            // Group works by user email (lower case) for the selected day
+                            const worksByUser = dayWorks.reduce((acc, work) => {
+                              const email = (work.userEmail || 'unknown').toLowerCase();
+                              if (!acc[email]) {
+                                acc[email] = [];
                               }
-                              acc[pId].push(work);
+                              acc[email].push(work);
                               return acc;
                             }, {} as Record<string, any[]>);
 
-                            return Object.entries(worksByProject).map(([pId, pWorks]) => {
-                              const typedWorks = pWorks as any[];
-                              const firstWork = typedWorks[0];
-                              const projectObj = projects.find(p => p.id === pId);
-                              const projectName = projectObj?.name || firstWork.projectName;
-                              const projectCode = projectObj?.code;
-                              const projectDomain = projectObj?.domain;
+                            return (Object.entries(worksByUser) as [string, any[]][]).map(([userEmail, userWorks]) => {
+                              const userName = employeeEmailToNameMap[userEmail] || userEmail;
+                              
+                              // Group this user's works by projectId
+                              const worksByProject = userWorks.reduce((acc, work) => {
+                                const pId = work.projectId;
+                                if (!acc[pId]) {
+                                  acc[pId] = [];
+                                }
+                                acc[pId].push(work);
+                                return acc;
+                              }, {} as Record<string, any[]>);
 
-                              // Aggregate counts for this project
+                              const userProjectIds = Object.keys(worksByProject);
+                              const activeProjId = selectedUserProjects[userEmail] || userProjectIds[0] || '';
+                              const activeProjectWorks = worksByProject[activeProjId] || [];
+
+                              // Calculate aggregated counts for the active project
                               let blogCount = 0;
                               let listingCount = 0;
                               let forumCount = 0;
@@ -2134,7 +2153,7 @@ export default function DSRDashboard({
                               let linkCount = 0;
                               const customValues: Record<string, number> = {};
 
-                              typedWorks.forEach(w => {
+                              activeProjectWorks.forEach(w => {
                                 blogCount += Number(w.blogCount) || 0;
                                 listingCount += Number(w.listingCount) || 0;
                                 forumCount += Number(w.forumCount) || 0;
@@ -2151,98 +2170,154 @@ export default function DSRDashboard({
                                 }
                               });
 
-                              const reportersInvolved = Array.from(new Set(typedWorks.map(w => employeeEmailToNameMap[w.userEmail.toLowerCase()] || w.userEmail)));
-                              const regionsInvolved = Array.from(new Set(typedWorks.map(w => w.region))).filter(Boolean);
-                              const summaries = typedWorks.map(w => w.workSummary).filter(Boolean);
+                              const activeProjObj = projects.find(p => p.id === activeProjId);
+                              const projectName = activeProjObj?.name || (activeProjectWorks[0]?.projectName) || activeProjId;
+                              const projectDomain = activeProjObj?.domain;
+
+                              const regionsInvolved = Array.from(new Set(activeProjectWorks.map(w => w.region))).filter(Boolean);
+                              const summaries = activeProjectWorks.map(w => w.workSummary).filter(Boolean);
+                              const projectContentUpdates = Array.from(new Set(activeProjectWorks.flatMap(w => w.contentUpdates || [])));
 
                               return (
-                                <div key={pId} className="bg-white p-4.5 rounded-2xl border border-slate-150 shadow-2xs space-y-3.5 text-xs hover:bg-slate-50/50 transition-all text-left">
-                                  <div className="flex justify-between items-start gap-2">
+                                <div key={userEmail} className="bg-white p-5 rounded-2xl border border-slate-150 shadow-sm space-y-4 text-xs text-left">
+                                  {/* User details at the top of the block */}
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                                     <div>
-                                      <div className="font-extrabold text-slate-900 flex items-center flex-wrap gap-1.5 leading-tight">
-                                        <span className="text-sm font-black text-slate-850">{projectName}</span>
-                                        {projectCode && (
-                                          <span className="text-[9px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
-                                            {projectCode}
-                                          </span>
-                                        )}
-                                        {projectDomain && (
-                                          <a 
-                                            href={`https://${projectDomain}`} 
-                                            target="_blank" 
-                                            rel="noreferrer" 
-                                            className="text-indigo-600 hover:underline font-bold text-[10px] ml-1 inline-flex items-center"
-                                          >
-                                            {projectDomain}
-                                          </a>
-                                        )}
-                                      </div>
-                                      <div className="text-[10px] font-bold text-slate-400 mt-1">
-                                        By {reportersInvolved.join(', ')}
-                                      </div>
+                                      <span className="block text-[9px] font-black uppercase text-slate-400 tracking-wider">Submitted By</span>
+                                      <span className="text-sm font-black text-slate-800">{userName}</span>
                                     </div>
                                     {regionsInvolved.length > 0 && (
-                                      <span className="text-[9px] font-mono font-black border border-slate-200 bg-slate-50 px-1.5 py-0.5 rounded text-slate-500 uppercase leading-none shrink-0">
-                                        {regionsInvolved.join(' / ')} Region
+                                      <span className="text-[9px] font-mono font-black border border-slate-200 bg-slate-50 px-2 py-0.5 rounded text-slate-500 uppercase leading-none">
+                                        {regionsInvolved.join(' / ')}
                                       </span>
                                     )}
                                   </div>
 
-                                  {summaries.length > 0 && (
-                                    <div className="space-y-1.5 pt-0.5">
-                                      {summaries.map((summary, sIdx) => (
-                                        <p key={sIdx} className="text-[11px] font-medium text-slate-650 bg-slate-50 border border-slate-150 p-2.5 rounded-xl leading-relaxed">
-                                          {summary}
-                                        </p>
-                                      ))}
+                                  {/* Dropdown to switch projects if this user submitted to multiple projects */}
+                                  {userProjectIds.length > 0 && (
+                                    <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-200/50 space-y-1.5">
+                                      <label className="block text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                                        Select Project ({userProjectIds.length} worked)
+                                      </label>
+                                      <select
+                                        value={activeProjId}
+                                        onChange={(e) => {
+                                          setSelectedUserProjects(prev => ({
+                                            ...prev,
+                                            [userEmail]: e.target.value
+                                          }));
+                                        }}
+                                        className="w-full text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 cursor-pointer focus:outline-none focus:border-indigo-500 transition-colors"
+                                      >
+                                        {userProjectIds.map(pId => {
+                                          const proj = projects.find(p => p.id === pId);
+                                          const name = proj?.name || pId;
+                                          return (
+                                            <option key={pId} value={pId}>
+                                              {name}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
                                     </div>
                                   )}
 
-                                  {/* Grid of backlinks count */}
-                                  <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 text-[9px] font-black uppercase text-slate-400 tracking-tight text-center pt-1.5">
-                                    <div className="bg-emerald-50/20 p-1.5 rounded border border-emerald-100/40 text-emerald-700">
-                                      <span className="block text-[7px] font-bold text-emerald-400">Blogs</span>
-                                      {blogCount}
-                                    </div>
-                                    <div className="bg-indigo-50/20 p-1.5 rounded border border-indigo-100/40 text-indigo-700">
-                                      <span className="block text-[7px] font-bold text-indigo-400">Listings</span>
-                                      {listingCount}
-                                    </div>
-                                    <div className="bg-teal-50/20 p-1.5 rounded border border-teal-100/40 text-teal-700 font-bold">
-                                      <span className="block text-[7px] font-bold text-teal-400">Forum</span>
-                                      {forumCount}
-                                    </div>
-                                    <div className="bg-amber-50/20 p-1.5 rounded border border-amber-100/40 text-amber-700">
-                                      <span className="block text-[7px] font-bold text-amber-400">PDFs</span>
-                                      {pdfCount}
-                                    </div>
-                                    <div className="bg-rose-50/20 p-1.5 rounded border border-rose-100/40 text-rose-700">
-                                      <span className="block text-[7px] font-bold text-rose-455">Images</span>
-                                      {imageCount}
-                                    </div>
-                                    <div className="bg-sky-50/20 p-1.5 rounded border border-sky-100/40 text-sky-700">
-                                      <span className="block text-[7px] font-bold text-sky-455">Video/PPT</span>
-                                      {videoPptCount}
-                                    </div>
-                                    <div className="bg-orange-50/20 p-1.5 rounded border border-orange-100/40 text-orange-700">
-                                      <span className="block text-[7px] font-bold text-orange-455">Profile</span>
-                                      {profileCount}
-                                    </div>
-                                    <div className="bg-fuchsia-50/20 p-1.5 rounded border border-fuchsia-100/40 text-fuchsia-700">
-                                      <span className="block text-[7px] font-bold text-fuchsia-455">Links</span>
-                                      {linkCount}
-                                    </div>
-                                    {customSubmissionTypes.map((type) => {
-                                      const val = customValues[type.id] || 0;
-                                      if (val === 0) return null;
-                                      return (
-                                        <div key={type.id} className="bg-purple-50/20 p-1.5 rounded border border-purple-100/40 text-purple-705">
-                                          <span className="block text-[7px] font-bold text-purple-400 truncate" title={type.name}>{type.name}</span>
-                                          {val}
+                                  {/* Selected Project Specific Information */}
+                                  {activeProjId && (
+                                    <div className="space-y-3 pt-1">
+                                      <div className="flex justify-between items-center">
+                                        <div className="font-extrabold text-slate-900 flex items-center flex-wrap gap-1.5 leading-tight">
+                                          <span className="text-xs font-black text-slate-700 uppercase tracking-wide">Active Project:</span>
+                                          <span className="text-xs font-black text-indigo-600">{projectName}</span>
+                                          {projectDomain && (
+                                            <a 
+                                              href={`https://${projectDomain}`} 
+                                              target="_blank" 
+                                              rel="noreferrer" 
+                                              className="text-indigo-600 hover:underline font-bold text-[10px] ml-1 inline-flex items-center"
+                                            >
+                                              {projectDomain}
+                                            </a>
+                                          )}
                                         </div>
-                                      );
-                                    })}
-                                  </div>
+                                      </div>
+
+                                      {summaries.length > 0 && (
+                                        <div className="space-y-1.5">
+                                          {summaries.map((summary, sIdx) => (
+                                            <p key={sIdx} className="text-[11px] font-medium text-slate-650 bg-slate-50 border border-slate-150 p-2.5 rounded-xl leading-relaxed">
+                                              {summary}
+                                            </p>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {/* Grid of backlinks count */}
+                                      <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 text-[9px] font-black uppercase text-slate-400 tracking-tight text-center pt-1">
+                                        <div className="bg-emerald-50/20 p-1.5 rounded border border-emerald-100/40 text-emerald-700">
+                                          <span className="block text-[7px] font-bold text-emerald-400">Blogs</span>
+                                          {blogCount}
+                                        </div>
+                                        <div className="bg-indigo-50/20 p-1.5 rounded border border-indigo-100/40 text-indigo-700">
+                                          <span className="block text-[7px] font-bold text-indigo-400">Listings</span>
+                                          {listingCount}
+                                        </div>
+                                        <div className="bg-teal-50/20 p-1.5 rounded border border-teal-100/40 text-teal-700 font-bold">
+                                          <span className="block text-[7px] font-bold text-teal-400">Forum</span>
+                                          {forumCount}
+                                        </div>
+                                        <div className="bg-amber-50/20 p-1.5 rounded border border-amber-100/40 text-amber-700">
+                                          <span className="block text-[7px] font-bold text-amber-400">PDFs</span>
+                                          {pdfCount}
+                                        </div>
+                                        <div className="bg-rose-50/20 p-1.5 rounded border border-rose-100/40 text-rose-700">
+                                          <span className="block text-[7px] font-bold text-rose-455">Images</span>
+                                          {imageCount}
+                                        </div>
+                                        <div className="bg-sky-50/20 p-1.5 rounded border border-sky-100/40 text-sky-700">
+                                          <span className="block text-[7px] font-bold text-sky-455">Video/PPT</span>
+                                          {videoPptCount}
+                                        </div>
+                                        <div className="bg-orange-50/20 p-1.5 rounded border border-orange-100/40 text-orange-700">
+                                          <span className="block text-[7px] font-bold text-orange-455">Profile</span>
+                                          {profileCount}
+                                        </div>
+                                        <div className="bg-fuchsia-50/20 p-1.5 rounded border border-fuchsia-100/40 text-fuchsia-700">
+                                          <span className="block text-[7px] font-bold text-fuchsia-455">Links</span>
+                                          {linkCount}
+                                        </div>
+                                        {customSubmissionTypes.map((type) => {
+                                          const val = customValues[type.id] || 0;
+                                          if (val === 0) return null;
+                                          return (
+                                            <div key={type.id} className="bg-purple-50/20 p-1.5 rounded border border-purple-100/40 text-purple-705">
+                                              <span className="block text-[7px] font-bold text-purple-400 truncate" title={type.name}>{type.name}</span>
+                                              {val}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+
+                                      {/* List of active content updates displayed underneath backlinks */}
+                                      {projectContentUpdates.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2.5 pt-2 border-t border-slate-100">
+                                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight self-center mr-1">Content Updates:</span>
+                                          {projectContentUpdates.map(cu => {
+                                            let label = cu;
+                                            if (cu === 'meta_title_desc') label = 'Meta Title & Description';
+                                            if (cu === 'keyword_update') label = 'Keyword Update';
+                                            if (cu === 'section_update') label = 'Section Update';
+                                            if (cu === 'restructure') label = 'Restructure';
+                                            return (
+                                              <span key={cu} className="text-[9px] font-extrabold bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                                {label}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             });

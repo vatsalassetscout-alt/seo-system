@@ -1,8 +1,6 @@
 {
   "name": "Data Tracking System",
-  "description": "Daily Status Report (DSR) and project tracking system with Google Sheets integration and local fallback storage.",
+  "description": "Daily Status Report (DSR) and project tracking system with stable local file-based database storage.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": []
 }

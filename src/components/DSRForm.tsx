@@ -53,8 +53,8 @@ export default function DSRForm({
   // We support single project entry in a submission session based on user preference
   const [worksList, setWorksList] = useState<any[]>([
     {
-      projectId: projects[0]?.id || '',
-      projectName: projects[0]?.name || '',
+      projectId: '',
+      projectName: '',
       listingCount: '',
       blogCount: '',
       forumCount: '',
@@ -97,23 +97,6 @@ export default function DSRForm({
       }
     }
   };
-
-  useEffect(() => {
-    if (projects && projects.length > 0) {
-      setWorksList((prev) =>
-        prev.map((item) => {
-          if (!item.projectId && projects[0]) {
-            return {
-              ...item,
-              projectId: projects[0].id,
-              projectName: projects[0].name,
-            };
-          }
-          return item;
-        })
-      );
-    }
-  }, [projects]);
 
   useEffect(() => {
     if (preFill && preFill.projectId) {
@@ -168,8 +151,8 @@ export default function DSRForm({
   const handleResetForm = () => {
     setWorksList([
       {
-        projectId: projects[0]?.id || '',
-        projectName: projects[0]?.name || '',
+        projectId: '',
+        projectName: '',
         listingCount: '',
         blogCount: '',
         forumCount: '',
